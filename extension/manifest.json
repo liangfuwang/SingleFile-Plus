@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "帖子单文件保存器",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "把网页保存为单文件 HTML：图片 base64 内嵌、离线可看、点击放大。支持论坛静态抓取与飞书/Notion 等 SPA 的渲染抓取。",
-  "permissions": ["downloads", "tabs", "scripting", "declarativeNetRequest"],
+  "permissions": ["downloads", "tabs", "scripting", "declarativeNetRequest", "offscreen", "storage"],
+  "background": { "service_worker": "background.js" },
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
