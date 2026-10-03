@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#9333ea"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 满幅渐变背景（无留白，与其他扩展图标视觉等大） -->
+  <rect x="0" y="0" width="128" height="128" fill="url(#bg)"/>
+
+  <!-- 「贴」字主体（加大） -->
+  <text x="64" y="109" text-anchor="middle"
+        font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif"
+        font-size="118" font-weight="800" fill="#ffffff">贴</text>
+</svg>
