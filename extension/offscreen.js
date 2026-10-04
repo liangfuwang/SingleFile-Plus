@@ -649,6 +649,7 @@ async function saveStatic(threadUrl, fname) {
   let out = replaceUrls(html, dataUris, threadUrl);
   out = fixLazyLoad(out);
   out = await inlineStylesheets(out, threadUrl);
+  out = await inlineStyleUrls(out, threadUrl);
   // 移除页面全部脚本（含内联）。Discuz 内联脚本依赖已删掉的外部脚本，
   // 保留会在本地打开时抛 ReferenceError（HTMLNODE / initSearchmenu 等）
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
