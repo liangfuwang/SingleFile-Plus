@@ -19,7 +19,7 @@ chrome.runtime.onMessage.addListener((m) => {
 });
 async function runJob(job) {
   try {
-    const mode = job.mode === 'auto' || !job.mode ? await detectMode(job.url) : job.mode;
+    const mode = await detectMode(job.url);
     if (mode === 'rendered') await saveRendered(job.url, job.fname);
     else await saveStatic(job.url, job.fname);
     await chrome.runtime.sendMessage({ target: 'bg', type: 'done' });

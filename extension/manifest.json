@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PageVault 网页存档",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "把网页保存为单文件 HTML：图片 base64 内嵌、离线可看、点击放大。支持论坛静态抓取与飞书/Notion/知识星球等 SPA 的渲染抓取，并可自动识别。",
   "permissions": ["downloads", "tabs", "scripting", "declarativeNetRequest", "offscreen", "storage"],
   "background": { "service_worker": "background.js" },

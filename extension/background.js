@@ -69,17 +69,17 @@ async function closeOffscreen() {
 }
 
 /* ---------- 任务生命周期 ---------- */
-async function startJob({ url, fname, mode }) {
+async function startJob({ url, fname }) {
   await ready;
   if (state.status === 'running') return { error: '已有保存任务在后台进行，请等它完成' };
-  state = { status: 'running', url, mode, logs: [], progress: 0.01 };
+  state = { status: 'running', url, logs: [], progress: 0.01 };
   persist();
   notifyPopup({ type: 'status', status: 'running' });
   setBadge('…', '#2563eb');
   keepAlive(true);
   try {
     await ensureOffscreen();
-    await chrome.runtime.sendMessage({ target: 'offscreen', type: 'run', job: { url, fname, mode } });
+    await chrome.runtime.sendMessage({ target: 'offscreen', type: 'run', job: { url, fname } });
   } catch (e) {
     await finishJob(false, e.message);
   }

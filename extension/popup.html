@@ -13,10 +13,6 @@
   button { width: 100%; margin-top: 14px; padding: 10px; border: none; border-radius: 8px; background: #2563eb; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
   button:hover { background: #1d4ed8; }
   button:disabled { background: #3a3d45; color: #777; cursor: not-allowed; }
-  .modes { display: flex; gap: 6px; }
-  .modes label { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; margin: 0; padding: 7px 4px; font-size: 12px; color: #c8ccd4; background: #2a2c33; border: 1px solid #3a3d45; border-radius: 8px; cursor: pointer; }
-  .modes label:has(input:checked) { border-color: #5b8def; background: #22304d; color: #e8e8ea; }
-  .modes input { accent-color: #2563eb; margin: 0; }
   #log { margin-top: 12px; max-height: 180px; overflow-y: auto; background: #141519; border-radius: 8px; padding: 10px; font: 12px/1.7 Menlo, Consolas, monospace; color: #9aa0ab; display: none; }
   #log .ok { color: #4ade80; }
   #log .err { color: #f87171; }
@@ -30,18 +26,12 @@
   <h1><span class="dot"></span>PageVault 网页存档</h1>
   <label>页面 URL</label>
   <input type="text" id="url" placeholder="https://forum.example.com/forum.php?mod=viewthread&tid=...">
-  <label>抓取方式</label>
-  <div class="modes">
-    <label><input type="radio" name="mode" value="auto" checked>自动识别</label>
-    <label><input type="radio" name="mode" value="static">静态抓取</label>
-    <label><input type="radio" name="mode" value="rendered">渲染抓取</label>
-  </div>
   <label>保存文件名（自动取自网页标题，可修改）</label>
   <input type="text" id="fname" placeholder="自动生成">
   <button id="go">保存为单文件 HTML</button>
   <div class="bar"><div id="barFill"></div></div>
   <div id="log"></div>
-  <div class="tip">点「保存」后任务在后台运行：可以关闭弹窗、切换标签页，完成时图标角标显示 ✓，文件在「下载」文件夹里。<br>自动识别＝先探测页面，正文是 JS 渲染的就用渲染抓取，否则用静态抓取（推荐）；静态抓取＝直接取服务端 HTML（论坛帖）；渲染抓取＝在标签页里执行 JS 后取真实 DOM（飞书、Notion、知识星球等，会自动滚动加载全文）。</div>
+  <div class="tip">点「保存」后任务在后台运行：可以关闭弹窗、切换标签页，完成时图标角标显示 ✓，文件在「下载」文件夹里。<br>抓取方式自动判断：论坛帖等服务端渲染页面直接取 HTML；飞书、Notion、知识星球等 JS 渲染页面会在标签页里执行 JS 并自动滚动加载全文。</div>
 <script src="common.js"></script>
 <script src="popup.js"></script>
 </body>

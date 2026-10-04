@@ -5,7 +5,6 @@ const $go = document.getElementById('go');
 const $log = document.getElementById('log');
 const $bar = document.querySelector('.bar');
 const $barFill = document.getElementById('barFill');
-const $modes = [...document.querySelectorAll('input[name=mode]')];
 
 function log(msg, cls = '') {
   $log.style.display = 'block';
@@ -47,11 +46,6 @@ async function pageSubject(tabId) {
   }
 })();
 
-/* 默认「自动识别」：由后台先探测页面再决定静态还是渲染，不需要用户判断 */
-function currentMode() {
-  return ($modes.find((el) => el.checked) || {}).value || 'auto';
-}
-
 /* ---------- 与后台同步任务状态 ----------
  * 任务跑在后台，弹窗只是个窗口：随时可以关，重新打开会恢复日志和进度。 */
 function renderStatus(status) {
@@ -87,7 +81,7 @@ $go.addEventListener('click', async () => {
   progress(0.01);
   const fname = fnameEdited ? $fname.value.trim() : '';
   const r = await chrome.runtime.sendMessage({
-    target: 'bg', type: 'start', url, fname: fname || undefined, mode: currentMode(),
+    target: 'bg', type: 'start', url, fname: fname || undefined,
   }).catch((e) => ({ error: e.message }));
   if (r && r.error) { log('✗ ' + r.error, 'err'); return; }
   renderStatus('running');
