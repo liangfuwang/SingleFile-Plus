@@ -209,7 +209,7 @@ async function waitForTabReady(tabId, timeout = 40000) {
 
 /* 这段在目标标签页里执行，必须自包含（executeScript 会把它序列化过去） */
 async function captureRenderedDom(opts) {
-  const cfg = Object.assign({ minWait: 3000, maxWait: 30000, stepDelay: 240, settleDelay: 600, settleRounds: 5, maxScrollMs: 120000 }, opts || {});
+  const cfg = Object.assign({ minWait: 3000, maxWait: 30000, stepDelay: 240, settleDelay: 600, settleRounds: 5, maxScrollMs: 120000, maxRounds: 400 }, opts || {});
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const textLen = () => (document.body && document.body.innerText ? document.body.innerText.trim().length : 0);
@@ -247,16 +247,18 @@ async function captureRenderedDom(opts) {
   };
 
   const nodesBefore = document.querySelectorAll('*').length;
-  const scrollDeadline = Date.now() + cfg.maxScrollMs;
+  const scrollStart = Date.now();
+  const scrollDeadline = scrollStart + cfg.maxScrollMs;
   let scroller = findScroller();
   let stable = 0, lastH = -1, lastTop = -1, round = 0;
-  while (stable < cfg.settleRounds && round < 400 && Date.now() < scrollDeadline) {
+  let stopReason = ''; // stable 正常到底 / no-scroll 无需滚动 / rounds 轮数上限 / timeout 超时
+  while (stable < cfg.settleRounds && round < cfg.maxRounds && Date.now() < scrollDeadline) {
     round++;
     if (!scroller.el || !scroller.el.isConnected || round % 20 === 1) scroller = findScroller();
     const el = scroller.el;
-    if (!el) break;
+    if (!el) { stopReason = 'no-scroll'; break; }
     const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    if (maxTop <= 4) break;
+    if (maxTop <= 4) { stopReason = 'no-scroll'; break; }
     // 必须真的滚到底之后才允许判定"稳定"。只按高度不变就收手的话，
     // 因为步长是 0.8 屏，会在离底部还差一段的地方就退出，懒加载的内容全漏掉。
     const atBottom = el.scrollTop >= maxTop - 4;
@@ -272,6 +274,8 @@ async function captureRenderedDom(opts) {
       await sleep(cfg.stepDelay);
     }
   }
+  if (!stopReason) stopReason = stable >= cfg.settleRounds ? 'stable' : round >= cfg.maxRounds ? 'rounds' : 'timeout';
+  const scrollInfo = { stopReason, rounds: round, scrollMs: Date.now() - scrollStart };
   if (scroller.el && scroller.el.isConnected) scroller.el.scrollTop = 0;
   await sleep(900);
 
@@ -304,6 +308,7 @@ async function captureRenderedDom(opts) {
     blobs,
     nodesBefore,
     nodesAfter: document.querySelectorAll('*').length,
+    scrollInfo,
   };
 }
 
@@ -318,7 +323,19 @@ async function capture({ url }) {
       // 标签页在后台时定时器会被降频到约 1 秒一次，滚动上限放宽以免长文档被截断
       args: [{ minWait: 3000, stepDelay: 240, settleDelay: 600, settleRounds: 5, maxScrollMs: 240000 }],
     });
-    return injected && injected[0] && injected[0].result;
+    const result = injected && injected[0] && injected[0].result;
+    if (result && result.scrollInfo) {
+      const { stopReason, rounds, scrollMs } = result.scrollInfo;
+      const sec = (scrollMs / 1000).toFixed(0);
+      if (stopReason === 'rounds' || stopReason === 'timeout') {
+        // 页面一直在加载新内容，是被上限截停的，不是滚到了真正的底部
+        const why = stopReason === 'rounds' ? '已达滚动轮数上限（' + rounds + ' 轮）' : '已达滚动时间上限（' + sec + ' 秒）';
+        addLog('⚠ ' + why + '，页面仍在加载新内容，可能没抓全；已保存当前已渲染的部分', 'err');
+      } else {
+        addLog('滚动完成：' + rounds + ' 轮 / ' + sec + ' 秒' + (stopReason === 'no-scroll' ? '（页面无需滚动）' : '，已到页面底部'));
+      }
+    }
+    return result;
   } finally {
     if (created) { try { await chrome.tabs.remove(tabId); } catch { /* ignore */ } }
   }
