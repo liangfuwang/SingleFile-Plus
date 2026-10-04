@@ -10,11 +10,12 @@
   const CONCURRENT = 6;      // 并发下载数
   const INCLUDE_BG = true;   // 是否处理 CSS 内联 background-image
   // 自定义头像常直接 403，回退到站内默认头像
-  const AVATAR_FALLBACKS = [
-    [/_avatar_small\./i, 'https://forum.example.com/uc_server/images/noavatar_small.gif'],
-    [/_avatar_middle\./i, 'https://forum.example.com/uc_server/images/noavatar_middle.gif'],
-    [/_avatar_big\./i, 'https://forum.example.com/uc_server/images/noavatar_big.gif'],
-  ];
+  const AVATAR_SIZES = [[/_avatar_small\./i, 'small'], [/_avatar_middle\./i, 'middle'], [/_avatar_big\./i, 'big']];
+  const avatarFallbackUrl = (url) => {
+    const hit = AVATAR_SIZES.find(([re]) => re.test(url));
+    if (!hit) return null;
+    try { return new URL(url).origin + '/uc_server/images/noavatar_' + hit[1] + '.gif'; } catch { return null; }
+  };
 
   // ---------- 收集所有图片 URL ----------
   const urls = new Set();
@@ -65,9 +66,9 @@
     try {
       return await fetchAsDataUrl(url);
     } catch (e) {
-      const rule = AVATAR_FALLBACKS.find(([re]) => re.test(url));
-      if (rule) {
-        try { return await fetchAsDataUrl(rule[1]); } catch { /* fallthrough */ }
+      const fb = avatarFallbackUrl(url);
+      if (fb) {
+        try { return await fetchAsDataUrl(fb); } catch { /* fallthrough */ }
       }
       console.warn('⚠ 图片下载失败(可能跨域限制):', url, e.message);
       return null;

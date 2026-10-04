@@ -1,9 +1,9 @@
-# PageVault — 示例站点 帖子 → 单文件 HTML 保存工具（绕过图片防盗链）
+# PageVault — 网页 → 单文件 HTML 保存工具（支持登录页与图片防盗链）
 
 ## 问题原因
 
-- 帖子图片**需要登录**才能看到。
-- 图片托管在独立图床 `img.example.com`，有**防盗链**（校验 Referer + Cookie）。通用的单文件保存扩展（如 SingleFile）抓不到图片，本地打开时请求被拒，显示"图片被盗"占位图。
+- 部分论坛帖子的图片**需要登录**才能看到。
+- 图片常托管在独立图床上，有**防盗链**（校验 Referer + Cookie）。通用的单文件保存工具可能抓不到图片，本地打开时请求被拒，显示"图片被盗"之类的占位图。
 
 ## 方案 A：全自动脚本（推荐）
 
@@ -12,18 +12,18 @@
 ### 用法
 
 ```bash
-PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-page.js "<帖子URL>" "输出文件名.html"
+PV_USER=xxx PV_PASS=yyy node save-page.js "<帖子URL>" "输出文件名.html"
 ```
 
 示例：
 
 ```bash
-PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-page.js \
+PV_USER=xxx PV_PASS=yyy node save-page.js \
   "https://forum.example.com/forum.php?mod=viewthread&tid=123456" \
   "output.html"
 ```
 
-> `NODE_USE_ENV_PROXY=1` 让 Node 的 fetch 走系统代理（本机代理 127.0.0.1:10808，直连会被重置）。
+> 目标站点需要代理才能访问时，加上 `NODE_USE_ENV_PROXY=1` 并设置 `HTTPS_PROXY`，Node 的 fetch 就会走代理。
 
 ### 账号
 

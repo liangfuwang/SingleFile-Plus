@@ -60,11 +60,13 @@ async function detectMode(url) {
 
 /* 自定义头像经常 403（无论带不带 Referer/Cookie），回退到站内默认头像；
  * 实在拿不到就内联占位图，保证离线无外部请求。 */
-const AVATAR_FALLBACKS = [
-  [/_avatar_small\./i, 'https://forum.example.com/uc_server/images/noavatar_small.gif'],
-  [/_avatar_middle\./i, 'https://forum.example.com/uc_server/images/noavatar_middle.gif'],
-  [/_avatar_big\./i, 'https://forum.example.com/uc_server/images/noavatar_big.gif'],
-];
+const AVATAR_SIZES = [[/_avatar_small\./i, 'small'], [/_avatar_middle\./i, 'middle'], [/_avatar_big\./i, 'big']];
+/* Discuz/UCenter 的默认头像与头像 URL 同源：<origin>/uc_server/images/noavatar_<size>.gif */
+function avatarFallbackUrl(url) {
+  const hit = AVATAR_SIZES.find(([re]) => re.test(url));
+  if (!hit) return null;
+  try { return new URL(url).origin + '/uc_server/images/noavatar_' + hit[1] + '.gif'; } catch { return null; }
+}
 const PLACEHOLDER_IMG = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120" viewBox="0 0 160 120">' +
   '<rect width="160" height="120" fill="#eceff3"/>' +
@@ -273,11 +275,11 @@ async function fetchImageWithFallback(url, cache) {
   try {
     return await fetchImage(url);
   } catch (e) {
-    const rule = AVATAR_FALLBACKS.find(([re]) => re.test(url));
-    if (!rule) throw e;
-    if (cache.has(rule[1])) return cache.get(rule[1]);
-    const d = await fetchImage(rule[1]);
-    cache.set(rule[1], d);
+    const fb = avatarFallbackUrl(url);
+    if (!fb) throw e;
+    if (cache.has(fb)) return cache.get(fb);
+    const d = await fetchImage(fb);
+    cache.set(fb, d);
     return d;
   }
 }

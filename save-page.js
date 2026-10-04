@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * save-page.js — PageVault：抓取 示例站点 帖子并生成图片内嵌的单文件 HTML
+ * save-page.js — PageVault：抓取 Discuz 论坛帖子并生成图片内嵌的单文件 HTML
  *
  * 用法: node save-page.js <帖子URL> [输出文件名.html]
  * 流程: 登录(如需) → 过年龄门(如需) → 抓页面 → 带Referer下载所有图片
@@ -9,7 +9,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const SITE = 'https://forum.example.com';
+const THREAD_URL = process.argv[2];
+if (!THREAD_URL || !/^https?:\/\//.test(THREAD_URL)) {
+  console.error('用法: PV_USER=xxx PV_PASS=yyy node save-page.js <帖子URL> [输出文件名.html]');
+  process.exit(1);
+}
+const SITE = new URL(THREAD_URL).origin;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const USERNAME = process.env.PV_USER;
 const PASSWORD = process.env.PV_PASS;
@@ -211,9 +216,8 @@ async function inlineStylesheets(html, pageUrl) {
 
 // ---------- 主流程 ----------
 async function main() {
-  const threadUrl = process.argv[2];
+  const threadUrl = THREAD_URL;
   const outFile = process.argv[3] || `thread-${(threadUrl.match(/tid=(\d+)/) || [])[1] || Date.now()}.html`;
-  if (!threadUrl) { console.error('用法: node save-page.js <帖子URL> [输出.html]'); process.exit(1); }
 
   await login();
   let html = await passAgeGate(threadUrl);
