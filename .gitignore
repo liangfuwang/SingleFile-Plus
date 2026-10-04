@@ -8,3 +8,6 @@
 # 依赖 / 日志
 node_modules/
 *.log
+
+# 本地交接记录（个人工作记录，不入库）
+HANDOFF.md
