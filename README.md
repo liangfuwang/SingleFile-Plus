@@ -12,13 +12,13 @@
 ### 用法
 
 ```bash
-NODE_USE_ENV_PROXY=1 node save-page.js "<帖子URL>" "输出文件名.html"
+PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-page.js "<帖子URL>" "输出文件名.html"
 ```
 
 示例：
 
 ```bash
-NODE_USE_ENV_PROXY=1 node save-page.js \
+PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-page.js \
   "https://forum.example.com/forum.php?mod=viewthread&tid=123456" \
   "output.html"
 ```
@@ -27,11 +27,7 @@ NODE_USE_ENV_PROXY=1 node save-page.js \
 
 ### 账号
 
-脚本内置了账号，也可用环境变量覆盖：
-
-```bash
-PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-page.js ...
-```
+脚本不内置账号，必须通过环境变量 `PV_USER`、`PV_PASS` 提供，缺失时直接报错退出。请勿把账号写进仓库文件。
 
 ### 特性
 
@@ -51,10 +47,30 @@ PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-page.js ...
 2. `F12` → Console → 粘贴 `inline-images.js` 全部内容 → 回车
 3. 等进度条走完 → 用 SingleFile 扩展保存
 
+## 与 SingleFile 的对比
+
+[SingleFile](https://github.com/gildas-lormeau/SingleFile) 是成熟的通用网页存档扩展，本项目名称与之区分，定位也不同：PageVault 不是它的替代品，而是针对"需要登录 + 图床防盗链 + Discuz 论坛"这类场景的补充。
+
+| 维度 | SingleFile | PageVault |
+|------|-----------|-----------|
+| 定位 | 通用网页存档，覆盖任意网站 | 专注论坛帖 / SPA 文档的离线存档 |
+| 成熟度 | 长期维护，社区大，多浏览器支持 | 个人项目，仅 Chrome（MV3） |
+| 抓取方式 | 在当前页面 DOM 上序列化 | 静态请求 / 渲染抓取 / 自动识别三选一 |
+| 防盗链图片 | 依赖浏览器正常请求，图床校验 Referer 时可能抓不到 | 用 `declarativeNetRequest` 临时注入 Referer，并检测 302 占位图，失败不会存进文件 |
+| 多页帖子 | 只保存当前页 | 自动跟随分页，合并为一个文件 |
+| 懒加载图片 | 通用处理 | 针对 Discuz 的 `file` / `zoomfile` 真实地址 |
+| 年龄确认门 | 需手动通过 | 自动处理 |
+| 后台运行 | 需停留在页面上操作 | 任务在 offscreen 文档中后台跑，可关闭弹窗 |
+| 图片查看 | 保持原页面行为 | 内置点击放大灯箱 |
+| 页面脚本 | 默认移除 | 全部移除 |
+| 其他功能 | 批量保存标签页、自动保存、标注、压缩、云端上传等 | 无，保持精简 |
+| 依赖 | 较多功能模块 | 纯原生 JS，无外部依赖 |
+
+选择建议：普通网页、需要标注/批量/云同步，用 SingleFile；需要登录的论坛帖、带防盗链图床、多页合并，用 PageVault。
+
 ## 文件说明
 
 | 文件 | 用途 |
 |------|------|
 | `save-page.js` | 全自动抓取脚本（Node ≥ 24） |
 | `inline-images.js` | 浏览器控制台脚本（配合 SingleFile 扩展） |
-| `output.html` | 已生成的成品（9.9 MB，40 张图全部内嵌） |

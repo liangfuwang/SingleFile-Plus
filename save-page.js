@@ -11,8 +11,12 @@ const path = require('path');
 
 const SITE = 'https://forum.example.com';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const USERNAME = process.env.PV_USER || 'REMOVED';
-const PASSWORD = process.env.PV_PASS || '***REMOVED***';
+const USERNAME = process.env.PV_USER;
+const PASSWORD = process.env.PV_PASS;
+if (!USERNAME || !PASSWORD) {
+  console.error('缺少账号：请设置环境变量 PV_USER 和 PV_PASS');
+  process.exit(1);
+}
 
 // 站点自定义头像经常直接返回 403（无论带不带 Referer/Cookie），
 // 但站内默认头像 noavatar_*.gif 是可访问的。原页面也靠 onerror 回退到它。
