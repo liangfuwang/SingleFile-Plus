@@ -314,21 +314,30 @@ async function fetchCss(url) {
 /* 下载 CSS 里引用的资源（图标、雪碧图、字体）→ data URI */
 async function fetchCssAssets(urls, cache) {
   const queue = [...urls].filter((u) => !cache.has(u));
-  await Promise.all(Array.from({ length: 5 }, async () => {
+  const total = queue.length;
+  let done = 0;
+  const get = async (u) => {
+    const resp = await fetch(u, { credentials: 'include', signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    if (!blob.size || /^text\/html/i.test(blob.type)) throw new Error('无效资源');
+    return await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = rej;
+      fr.readAsDataURL(blob);
+    });
+  };
+  await Promise.all(Array.from({ length: 16 }, async () => {
     while (queue.length) {
       const u = queue.shift();
       try {
-        const resp = await fetch(u, { credentials: 'include' });
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const blob = await resp.blob();
-        if (!blob.size || /^text\/html/i.test(blob.type)) throw new Error('无效资源');
-        cache.set(u, await new Promise((res, rej) => {
-          const fr = new FileReader();
-          fr.onload = () => res(fr.result);
-          fr.onerror = rej;
-          fr.readAsDataURL(blob);
-        }));
+        // http 直接升级成 https，省掉一次 301 跳转（慢站点上能省一半时间）；升级失败再回退原地址
+        try { cache.set(u, await get(u.replace(/^http:/, 'https:'))); }
+        catch (e) { if (!/^http:/.test(u)) throw e; cache.set(u, await get(u)); }
       } catch { cache.set(u, null); }
+      done++;
+      if (done % 50 === 0 && done < total) log('样式资源进度: ' + done + '/' + total);
     }
   }));
 }
