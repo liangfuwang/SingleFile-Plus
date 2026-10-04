@@ -209,6 +209,7 @@ async function saveRendered(pageUrl, fname) {
   let out = replaceUrls(result.html, dataUris, result.baseUrl);
   out = stripLazyAttrs(out);
   out = await inlineStylesheets(out, result.baseUrl);
+  out = await inlineStyleUrls(out, result.baseUrl);
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<script\b[^>]*\/>/gi, '')
     .replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
@@ -299,14 +300,98 @@ function absolutizeCssUrls(css, cssUrl) {
     try { return `url(${q}${new URL(u, cssUrl).href}${q})`; } catch { return all; }
   });
 }
+/* 样式表必须是真的 CSS：SPA 站点对不存在的路径会回退成 index.html（HTTP 200），
+ * 直接内嵌会把整份 HTML 塞进 <style>，页面样式全丢。 */
+async function fetchCss(url) {
+  const resp = await fetch(url, { credentials: 'include' });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  const text = await resp.text();
+  const type = (resp.headers.get('content-type') || '').toLowerCase();
+  if (/html/.test(type) || /^\s*<(!doctype|html)\b/i.test(text)) throw new Error('返回的是 HTML 而非 CSS');
+  return text;
+}
+
+/* 下载 CSS 里引用的资源（图标、雪碧图、字体）→ data URI */
+async function fetchCssAssets(urls, cache) {
+  const queue = [...urls].filter((u) => !cache.has(u));
+  await Promise.all(Array.from({ length: 5 }, async () => {
+    while (queue.length) {
+      const u = queue.shift();
+      try {
+        const resp = await fetch(u, { credentials: 'include' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const blob = await resp.blob();
+        if (!blob.size || /^text\/html/i.test(blob.type)) throw new Error('无效资源');
+        cache.set(u, await new Promise((res, rej) => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result);
+          fr.onerror = rej;
+          fr.readAsDataURL(blob);
+        }));
+      } catch { cache.set(u, null); }
+    }
+  }));
+}
+
+/* 内嵌所有 <style> 里的 url()。同一资源（如雪碧图被引用几十次）只存一份到 :root 的
+ * CSS 变量，各处用 var() 引用，避免体积成倍膨胀；@font-face 里不支持 var()，直接内嵌。 */
+const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
+async function inlineStyleUrls(html, baseUrl) {
+  const styleRe = /(<style\b([^>]*)>)([\s\S]*?)(<\/style>)/gi;
+  const resolve = (u, base) => {
+    u = decodeEntities(u).trim();
+    if (!u || /^(data:|blob:|#|about:)/i.test(u)) return null;
+    try { const a = new URL(u, base).href; return /^https?:/.test(a) ? a : null; } catch { return null; }
+  };
+  const baseOf = (attrs) => ((attrs.match(/\bdata-src="([^"]+)"/) || [])[1]) || baseUrl;
+
+  const wanted = new Set();
+  for (const m of html.matchAll(styleRe)) {
+    for (const u of m[3].matchAll(CSS_URL_RE)) { const a = resolve(u[2], baseOf(m[2])); if (a) wanted.add(a); }
+  }
+  if (!wanted.size) return html;
+  log('样式表内引用 ' + wanted.size + ' 个资源（图标/字体），下载内嵌…');
+  const cache = new Map();
+  await fetchCssAssets(wanted, cache);
+
+  const vars = new Map();
+  const varOf = (a) => {
+    if (!vars.has(a)) vars.set(a, '--sf-a' + vars.size);
+    return vars.get(a);
+  };
+  let failed = 0;
+  const out = html.replace(styleRe, (all, open, attrs, css, close) => {
+    const base = baseOf(attrs);
+    const nc = css.replace(/@font-face\s*\{[^}]*\}|url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (tok, q, u) => {
+      if (tok[0] === '@') {
+        return tok.replace(CSS_URL_RE, (t, q2, u2) => {
+          const a = resolve(u2, base); const d = a && cache.get(a);
+          return d ? 'url("' + d + '")' : t;
+        });
+      }
+      const a = resolve(u, base);
+      if (!a) return tok;
+      if (!cache.get(a)) { failed++; return tok; }
+      return 'var(' + varOf(a) + ')';
+    });
+    return open + nc + close;
+  });
+  if (failed) log('⚠ 样式表里有 ' + failed + ' 处资源下载失败（图标可能缺失）', 'err');
+  if (!vars.size) return out;
+  const decl = [...vars].map(([a, v]) => v + ':url("' + cache.get(a) + '")').join(';');
+  const varStyle = '<style id="sf-css-assets">:root{' + decl + '}</style>';
+  return /<head\b[^>]*>/i.test(out) ? out.replace(/<head\b[^>]*>/i, (h) => h + varStyle) : varStyle + out;
+}
+
 async function inlineStylesheets(html, pageUrl) {
   let out = html;
   for (const { tag, url } of collectStyleLinks(html, pageUrl)) {
     try {
-      const css = absolutizeCssUrls(await fetchText(url), url);
+      const css = absolutizeCssUrls(await fetchCss(url), url);
       out = out.split(tag).join(`<style data-src="${url}">\n${css}\n</style>`);
-    } catch {
-      // 拉不到的样式表（如站点本身 403 的 t5/style.css）直接移除，避免打开时报错
+    } catch (e) {
+      // 拉不到/不是 CSS 的样式表直接移除，避免打开时报错
+      log('⚠ 样式表未能内嵌: ' + url + '（' + e.message + '）', 'err');
       out = out.split(tag).join('');
     }
   }

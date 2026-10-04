@@ -298,7 +298,7 @@ async function captureRenderedDom(opts) {
   const h1 = document.querySelector('h1.ts');
   return {
     html: '<!DOCTYPE html>\n' + cloneRoot.outerHTML,
-    baseUrl: location.href,
+    baseUrl: document.baseURI || location.href, // 尊重 <base href>，SPA 站点的相对路径靠它解析
     title: document.title || '',
     subject: h1 && h1.textContent ? h1.textContent.trim() : '',
     blobs,
