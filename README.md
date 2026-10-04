@@ -1,24 +1,24 @@
-# 示例站点 帖子 → 单文件 HTML 保存工具（绕过图片防盗链）
+# PageVault — 示例站点 帖子 → 单文件 HTML 保存工具（绕过图片防盗链）
 
 ## 问题原因
 
 - 帖子图片**需要登录**才能看到。
-- 图片托管在独立图床 `img.example.com`，有**防盗链**（校验 Referer + Cookie）。SingleFile 抓不到图片，本地打开时请求被拒，显示"图片被盗"占位图。
+- 图片托管在独立图床 `img.example.com`，有**防盗链**（校验 Referer + Cookie）。通用的单文件保存扩展（如 SingleFile）抓不到图片，本地打开时请求被拒，显示"图片被盗"占位图。
 
 ## 方案 A：全自动脚本（推荐）
 
-`save-singlefile.js` 全流程：登录 → 过年龄门 → 抓页面（含分页）→ 带防盗链头下载全部图片 → base64 内嵌 → 移除外部脚本 → 输出单文件 HTML。
+`save-page.js` 全流程：登录 → 过年龄门 → 抓页面（含分页）→ 带防盗链头下载全部图片 → base64 内嵌 → 移除外部脚本 → 输出单文件 HTML。
 
 ### 用法
 
 ```bash
-NODE_USE_ENV_PROXY=1 node save-singlefile.js "<帖子URL>" "输出文件名.html"
+NODE_USE_ENV_PROXY=1 node save-page.js "<帖子URL>" "输出文件名.html"
 ```
 
 示例：
 
 ```bash
-NODE_USE_ENV_PROXY=1 node save-singlefile.js \
+NODE_USE_ENV_PROXY=1 node save-page.js \
   "https://forum.example.com/forum.php?mod=viewthread&tid=123456" \
   "output.html"
 ```
@@ -30,7 +30,7 @@ NODE_USE_ENV_PROXY=1 node save-singlefile.js \
 脚本内置了账号，也可用环境变量覆盖：
 
 ```bash
-PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-singlefile.js ...
+PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-page.js ...
 ```
 
 ### 特性
@@ -55,6 +55,6 @@ PV_USER=xxx PV_PASS=yyy NODE_USE_ENV_PROXY=1 node save-singlefile.js ...
 
 | 文件 | 用途 |
 |------|------|
-| `save-singlefile.js` | 全自动抓取脚本（Node ≥ 24） |
+| `save-page.js` | 全自动抓取脚本（Node ≥ 24） |
 | `inline-images.js` | 浏览器控制台脚本（配合 SingleFile 扩展） |
 | `output.html` | 已生成的成品（9.9 MB，40 张图全部内嵌） |

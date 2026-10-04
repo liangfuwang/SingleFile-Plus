@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * save-singlefile.js — 抓取 示例站点 帖子并生成图片内嵌的单文件 HTML
+ * save-page.js — PageVault：抓取 示例站点 帖子并生成图片内嵌的单文件 HTML
  *
- * 用法: node save-singlefile.js <帖子URL> [输出文件名.html]
+ * 用法: node save-page.js <帖子URL> [输出文件名.html]
  * 流程: 登录(如需) → 过年龄门(如需) → 抓页面 → 带Referer下载所有图片
  *       → base64内嵌 → 移除外部脚本 → 输出单文件
  */
@@ -209,7 +209,7 @@ async function inlineStylesheets(html, pageUrl) {
 async function main() {
   const threadUrl = process.argv[2];
   const outFile = process.argv[3] || `thread-${(threadUrl.match(/tid=(\d+)/) || [])[1] || Date.now()}.html`;
-  if (!threadUrl) { console.error('用法: node save-singlefile.js <帖子URL> [输出.html]'); process.exit(1); }
+  if (!threadUrl) { console.error('用法: node save-page.js <帖子URL> [输出.html]'); process.exit(1); }
 
   await login();
   let html = await passAgeGate(threadUrl);

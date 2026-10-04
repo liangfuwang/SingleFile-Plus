@@ -139,5 +139,5 @@
     console.log('❌ 以下图片下载失败（跨域或防盗链拦截），详见列表：');
     console.table(failed);
   }
-  alert(`图片内嵌完成！成功 ${ok}/${list.length}。\n现在请用 SingleFile 扩展保存本页，\n图片将以 base64 形式永久保存在单个 HTML 文件里。`);
+  alert(`图片内嵌完成！成功 ${ok}/${list.length}。\n现在请用浏览器扩展（如 SingleFile）保存本页，\n图片将以 base64 形式永久保存在单个 HTML 文件里。`);
 })();

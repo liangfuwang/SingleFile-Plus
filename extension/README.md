@@ -1,4 +1,4 @@
-# 网页单文件保存器 — Chrome 插件
+# PageVault 网页存档 — Chrome 插件
 
 把网页一键保存为**单文件 HTML**：图片 base64 内嵌、离线可看、点击放大。支持两种抓取方式：
 
@@ -11,8 +11,8 @@
 1. 打开 Chrome，地址栏输入 `chrome://extensions/`
 2. 右上角打开 **开发者模式**
 3. 点左上角 **加载已解压的扩展程序**
-4. 选择本目录 `~/VibeCoding/SingleFile/extension`
-5. （可选）点浏览器右上角拼图图标 🧩，把「帖子单文件保存器」钉到工具栏
+4. 选择本目录 `~/VibeCoding/PageVault/extension`
+5. （可选）点浏览器右上角拼图图标 🧩，把「PageVault 网页存档」钉到工具栏
 
 ## 使用
 
@@ -56,6 +56,6 @@
 ## 命令行版本（备用）
 
 ```bash
-cd ~/VibeCoding/SingleFile
-NODE_USE_ENV_PROXY=1 node save-singlefile.js "帖子URL" "文件名.html"
+cd ~/VibeCoding/PageVault
+NODE_USE_ENV_PROXY=1 node save-page.js "帖子URL" "文件名.html"
 ```
