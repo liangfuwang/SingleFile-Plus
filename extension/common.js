@@ -40,6 +40,35 @@ function fallbackName() {
     '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
 }
 
+/* ---------- 自动识别抓取方式 ----------
+ * 静态抓取只能拿到服务端返回的 HTML；SPA（飞书、Notion、知识星球…）的正文由 JS 渲染，
+ * 静态拿到的是空壳。这里判断静态 HTML 里有没有"真正的正文"。 */
+const SPA_HOSTS = [
+  /(^|\.)feishu\.cn$/i, /(^|\.)larksuite\.com$/i, /(^|\.)larkoffice\.com$/i,
+  /(^|\.)notion\.so$/i, /(^|\.)notion\.site$/i,
+  /(^|\.)yuque\.com$/i,
+  /(^|\.)zsxq\.com$/i,
+];
+function isSpaUrl(url) {
+  try { return SPA_HOSTS.some((re) => re.test(new URL(url).hostname)); } catch { return false; }
+}
+
+/* 前端框架的挂载点：存在且里面几乎没字，基本就是空壳 */
+const SPA_ROOT_SELECTOR = 'app-root, #app, #root, #__next, #__nuxt, #q-app, #app-root, [ng-version], [ng-app], [data-reactroot]';
+
+function analyzeStaticHtml(html) {
+  if (/agree_submit/.test(html)) return { shell: false, textLen: 0, reason: '年龄确认门（静态流程可自动通过）' };
+  let doc;
+  try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch { return { shell: false, textLen: 0, reason: '无法解析' }; }
+  doc.querySelectorAll('script, style, noscript, template, head').forEach((el) => el.remove());
+  const textLen = ((doc.body && doc.body.textContent) || '').replace(/\s+/g, '').length;
+  const root = doc.body && doc.body.querySelector(SPA_ROOT_SELECTOR);
+  const rootLen = root ? (root.textContent || '').replace(/\s+/g, '').length : -1;
+  if (textLen < 200) return { shell: true, textLen, reason: '静态 HTML 正文仅 ' + textLen + ' 字' + (root ? '，且有前端框架挂载点 <' + root.tagName.toLowerCase() + (root.id ? '#' + root.id : '') + '>' : '') };
+  if (root && rootLen < 100 && textLen < 800) return { shell: true, textLen, reason: '前端框架挂载点内几乎没有内容（' + rootLen + ' 字）' };
+  return { shell: false, textLen, reason: '静态 HTML 含正文 ' + textLen + ' 字' };
+}
+
 /* Discuz 帖子的完整主题 = 主题分类（[原创]，在 h1.ts 的链接里）+ 标题（#thread_subject）。
  * <title> 里只有后者，所以优先读 h1.ts。 */
 function titleFromHtml(html) {

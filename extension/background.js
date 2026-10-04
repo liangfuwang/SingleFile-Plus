@@ -324,8 +324,25 @@ async function capture({ url }) {
   }
 }
 
+/* 自动识别用：该 URL 已经在某个标签页里打开时，量一下真实渲染出来的文本量
+ * （不新开标签页、不滚动，几乎零成本）。没有匹配的标签页或还在加载就返回 null。 */
+async function probeTab({ url }) {
+  const want = normalizeUrl(url);
+  const tabs = await chrome.tabs.query({});
+  const hit = tabs.find((t) => t.id != null && t.status === 'complete' && t.url && normalizeUrl(t.url) === want);
+  if (!hit) return null;
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: hit.id },
+      func: () => ({ textLen: ((document.body && document.body.innerText) || '').replace(/\s+/g, '').length }),
+    });
+    return (r && r.result) || null;
+  } catch { return null; }
+}
+
 const RPC = {
   capture,
+  probeTab,
   setReferer,
   clearReferer: async () => { await clearReferer(); },
   download: downloadBlob,

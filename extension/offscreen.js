@@ -19,12 +19,43 @@ chrome.runtime.onMessage.addListener((m) => {
 });
 async function runJob(job) {
   try {
-    if (job.mode === 'rendered') await saveRendered(job.url, job.fname);
+    const mode = job.mode === 'auto' || !job.mode ? await detectMode(job.url) : job.mode;
+    if (mode === 'rendered') await saveRendered(job.url, job.fname);
     else await saveStatic(job.url, job.fname);
     await chrome.runtime.sendMessage({ target: 'bg', type: 'done' });
   } catch (e) {
     await chrome.runtime.sendMessage({ target: 'bg', type: 'fail', error: (e && e.message) || String(e) });
   }
+}
+
+/* 自动识别：返回 'static' 或 'rendered'。
+ * 依据（按顺序）：已知 SPA 站点 → 静态请求失败 → 静态 HTML 是空壳 →
+ * 该页面已在标签页打开且真实文本量远大于静态文本量。拿不准时选静态（更快、不开标签页）。 */
+async function detectMode(url) {
+  log('自动识别抓取方式…', 'hl');
+  progress(0.02);
+  if (isSpaUrl(url)) {
+    log('已知 SPA 站点 → 渲染抓取', 'ok');
+    return 'rendered';
+  }
+  let staticInfo;
+  try {
+    staticInfo = analyzeStaticHtml(await fetchText(url));
+  } catch (e) {
+    log('静态请求失败（' + e.message + '）→ 改用渲染抓取', 'ok');
+    return 'rendered';
+  }
+  if (staticInfo.shell) {
+    log('判定为 JS 渲染页面：' + staticInfo.reason + ' → 渲染抓取', 'ok');
+    return 'rendered';
+  }
+  const live = await rpc('probeTab', { url }).catch(() => null);
+  if (live && live.textLen > staticInfo.textLen * 2 + 500) {
+    log('标签页真实文本 ' + live.textLen + ' 字，远多于静态 HTML 的 ' + staticInfo.textLen + ' 字 → 渲染抓取', 'ok');
+    return 'rendered';
+  }
+  log('判定为服务端渲染页面：' + staticInfo.reason + ' → 静态抓取', 'ok');
+  return 'static';
 }
 
 /* 自定义头像经常 403（无论带不带 Referer/Cookie），回退到站内默认头像；

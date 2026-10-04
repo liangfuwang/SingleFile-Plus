@@ -45,28 +45,12 @@ async function pageSubject(tabId) {
     const title = subject || tab.title;
     if (title && !fnameEdited) $fname.value = safeName(sanitize(title));
   }
-  selectMode(isSpaUrl($url.value) ? 'rendered' : 'static');
 })();
 
-/* SPA / 需登录后才由 JS 渲染正文的站点，静态抓取只能拿到空壳，默认走渲染模式 */
-const SPA_HOSTS = [
-  /(^|\.)feishu\.cn$/i, /(^|\.)larksuite\.com$/i, /(^|\.)larkoffice\.com$/i,
-  /(^|\.)notion\.so$/i, /(^|\.)notion\.site$/i,
-  /(^|\.)yuque\.com$/i,
-];
-function isSpaUrl(url) {
-  try { return SPA_HOSTS.some((re) => re.test(new URL(url).hostname)); } catch { return false; }
-}
-function selectMode(mode) {
-  for (const el of $modes) el.checked = el.value === mode;
-}
+/* 默认「自动识别」：由后台先探测页面再决定静态还是渲染，不需要用户判断 */
 function currentMode() {
-  return ($modes.find((el) => el.checked) || {}).value || 'static';
+  return ($modes.find((el) => el.checked) || {}).value || 'auto';
 }
-$url.addEventListener('input', () => {
-  if (!isSpaUrl($url.value)) return;
-  if (currentMode() !== 'rendered') { selectMode('rendered'); log('识别到 SPA 站点，已切换为「渲染抓取」'); }
-});
 
 /* ---------- 与后台同步任务状态 ----------
  * 任务跑在后台，弹窗只是个窗口：随时可以关，重新打开会恢复日志和进度。 */
