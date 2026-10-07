@@ -284,21 +284,27 @@ async function captureRenderedDom(opts) {
   const cloneRoot = document.documentElement.cloneNode(true);
   const cloned = [...cloneRoot.querySelectorAll('img')];
   const blobs = {};
+  const blobJobs = [];
   for (let i = 0; i < originals.length; i++) {
     const src = originals[i].currentSrc || originals[i].src || originals[i].getAttribute('src') || '';
     if (src && cloned[i]) cloned[i].setAttribute('src', src);
-    if (src.startsWith('blob:')) {
-      try {
-        const b = await (await fetch(src)).blob();
-        blobs[src] = await new Promise((res, rej) => {
-          const fr = new FileReader();
-          fr.onload = () => res(fr.result);
-          fr.onerror = rej;
-          fr.readAsDataURL(b);
-        });
-      } catch (e) { /* 拿不到就算了 */ }
+    if (src.startsWith('blob:') && !(src in blobs)) {
+      blobs[src] = null;
+      // blob 读取互不依赖，并行进行
+      blobJobs.push((async () => {
+        try {
+          const b = await (await fetch(src)).blob();
+          blobs[src] = await new Promise((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(fr.result);
+            fr.onerror = rej;
+            fr.readAsDataURL(b);
+          });
+        } catch (e) { delete blobs[src]; /* 拿不到就算了 */ }
+      })());
     }
   }
+  await Promise.all(blobJobs);
   const h1 = document.querySelector('h1.ts');
   return {
     html: '<!DOCTYPE html>\n' + cloneRoot.outerHTML,

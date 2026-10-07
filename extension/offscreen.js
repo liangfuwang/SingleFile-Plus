@@ -17,18 +17,23 @@ chrome.runtime.onMessage.addListener((m) => {
   if (!m || m.target !== 'offscreen' || m.type !== 'run') return;
   runJob(m.job);
 });
+const elapsed = (t) => ((Date.now() - t) / 1000).toFixed(1) + ' 秒';
 async function runJob(job) {
+  const jobStart = Date.now();
   try {
-    const mode = await detectMode(job.url);
+    const tDetect = Date.now();
+    const { mode, html } = await detectMode(job.url);
+    log('⏱ 自动识别 ' + elapsed(tDetect));
     if (mode === 'rendered') await saveRendered(job.url, job.fname);
-    else await saveStatic(job.url, job.fname);
+    else await saveStatic(job.url, job.fname, html);
+    log('⏱ 总耗时 ' + elapsed(jobStart), 'hl');
     await chrome.runtime.sendMessage({ target: 'bg', type: 'done' });
   } catch (e) {
     await chrome.runtime.sendMessage({ target: 'bg', type: 'fail', error: (e && e.message) || String(e) });
   }
 }
 
-/* 自动识别：返回 'static' 或 'rendered'。
+/* 自动识别：返回 { mode: 'static' | 'rendered', html? }，静态时顺带带回已抓到的首页 HTML，避免重复请求。
  * 依据（按顺序）：已知 SPA 站点 → 静态请求失败 → 静态 HTML 是空壳 →
  * 该页面已在标签页打开且真实文本量远大于静态文本量。拿不准时选静态（更快、不开标签页）。 */
 async function detectMode(url) {
@@ -36,26 +41,33 @@ async function detectMode(url) {
   progress(0.02);
   if (isSpaUrl(url)) {
     log('已知 SPA 站点 → 渲染抓取', 'ok');
-    return 'rendered';
+    return { mode: 'rendered' };
   }
-  let staticInfo;
+  // 标签页探测与首页请求互不依赖，同时发出（没有匹配标签页时几乎零成本）
+  const probe = rpc('probeTab', { url }).catch(() => null);
+  let staticInfo, html;
   try {
-    staticInfo = analyzeStaticHtml(await fetchText(url));
+    const tFetch = Date.now();
+    html = await fetchText(url);
+    log('⏱ 请求首页 ' + elapsed(tFetch));
+    staticInfo = analyzeStaticHtml(html);
   } catch (e) {
     log('静态请求失败（' + e.message + '）→ 改用渲染抓取', 'ok');
-    return 'rendered';
+    return { mode: 'rendered' };
   }
   if (staticInfo.shell) {
     log('判定为 JS 渲染页面：' + staticInfo.reason + ' → 渲染抓取', 'ok');
-    return 'rendered';
+    return { mode: 'rendered' };
   }
-  const live = await rpc('probeTab', { url }).catch(() => null);
+  const tProbe = Date.now();
+  const live = await probe;
+  log('⏱ 等待标签页探测 ' + elapsed(tProbe));
   if (live && live.textLen > staticInfo.textLen * 2 + 500) {
     log('标签页真实文本 ' + live.textLen + ' 字，远多于静态 HTML 的 ' + staticInfo.textLen + ' 字 → 渲染抓取', 'ok');
-    return 'rendered';
+    return { mode: 'rendered' };
   }
   log('判定为服务端渲染页面：' + staticInfo.reason + ' → 静态抓取', 'ok');
-  return 'static';
+  return { mode: 'static', html };
 }
 
 /* 自定义头像经常 403（无论带不带 Referer/Cookie），回退到站内默认头像；
@@ -98,18 +110,13 @@ function hostOf(u) {
 /* 渲染模式下的图片多是带签名的 URL（没有扩展名），不能按后缀筛，
  * 也不能因为发生重定向就判失败，只排除明显不是图片的响应 */
 async function fetchImageLoose(url) {
-  const resp = await fetch(url, { credentials: 'include' });
+  const resp = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(FETCH_TIMEOUT) });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const blob = await resp.blob();
   if (!blob.size) throw new Error('空响应');
   const type = (blob.type || '').toLowerCase();
   if (/^text\//.test(type) || /^application\/(json|xml|javascript)/.test(type)) throw new Error('非图片: ' + type);
-  return await new Promise((res, rej) => {
-    const fr = new FileReader();
-    fr.onload = () => res(fr.result);
-    fr.onerror = rej;
-    fr.readAsDataURL(blob);
-  });
+  return blobToDataUrl(blob);
 }
 
 function collectRenderedImageUrls(html, baseUrl) {
@@ -125,12 +132,10 @@ function collectRenderedImageUrls(html, baseUrl) {
   };
   for (const m of html.matchAll(/<img\b[^>]*>/gi)) {
     const tag = m[0];
-    for (const attr of ['src', 'data-src', 'data-original']) {
-      const a = tag.match(new RegExp(attr + '\\s*=\\s*"([^"]+)"', 'i'));
-      if (a) add(a[1]);
-    }
-    const ss = tag.match(/\bsrcset\s*=\s*"([^"]+)"/i);
-    if (ss) ss[1].split(',').forEach((p) => add(p.trim().split(/\s+/)[0]));
+    // 只取 src：capture 阶段已把它设成实际显示的 currentSrc；srcset / data-src 在
+    // stripLazyAttrs 里会被整个删掉，下载它们只是白白浪费流量和时间
+    const a = tag.match(/\bsrc\s*=\s*"([^"]+)"/i);
+    if (a) add(a[1]);
   }
   // 只取行内 style 的背景图；<style> 里的 url() 属于 CSS，交给样式表处理，别当图片下载
   for (const m of html.matchAll(/\bstyle\s*=\s*"([^"]*)"/gi)) {
@@ -151,9 +156,11 @@ async function saveRendered(pageUrl, fname) {
   progress(0.05);
 
   log('注入脚本：滚动触发懒加载 → 抓取渲染后的 DOM…');
+  const tCapture = Date.now();
   const result = await rpc('capture', { url: pageUrl });
   if (!result || !result.html) throw new Error('没取到渲染后的 DOM（页面可能还在加载，或被登录页拦截）');
   log('DOM 抓取完成: ' + (result.html.length / 1048576).toFixed(1) + ' MB', 'ok');
+  log('⏱ 渲染抓取 ' + elapsed(tCapture));
   progress(0.45);
 
   const title = (result.subject || result.title || '').trim();
@@ -164,9 +171,9 @@ async function saveRendered(pageUrl, fname) {
   }
 
   // blob: 图片已经在页面内转成 data URI，这里直接拿来用
-  const dataUris = new Map(Object.entries(result.blobs || {}));
+  const blobUrls = Object.keys(result.blobs || {});
   const urls = collectRenderedImageUrls(result.html, result.baseUrl);
-  for (const b of dataUris.keys()) urls.delete(b);
+  for (const b of blobUrls) urls.delete(b);
   const list = [...urls];
   log('发现 ' + list.length + ' 个图片，开始下载…');
 
@@ -180,52 +187,94 @@ async function saveRendered(pageUrl, fname) {
     log('⚠ 无法设置 Referer 规则，部分图片可能下载失败', 'err');
   }
 
-  try {
-    const failReasons = new Map();
-    const queue = [...list];
-    let done = 0, ok = 0;
-    await Promise.all(Array.from({ length: 5 }, async () => {
-      while (queue.length) {
-        const u = queue.shift();
-        try {
-          dataUris.set(u, await fetchImageLoose(u));
-          ok++;
-        } catch (e) {
-          dataUris.set(u, PLACEHOLDER_IMG);
-          const key = hostOf(u) + ': ' + e.message;
-          failReasons.set(key, (failReasons.get(key) || 0) + 1);
-        }
-        done++;
-        if (done % 10 === 0 || done === list.length) {
-          progress(0.45 + 0.4 * done / Math.max(1, list.length));
-          log('下载进度: ' + done + '/' + list.length);
-        }
-      }
-    }));
-    log('图片下载完成: 成功 ' + ok + ', 占位替代 ' + (list.length - ok), ok ? 'ok' : 'err');
-    for (const [reason, n] of [...failReasons].slice(0, 5)) log('  失败原因 [x' + n + ']: ' + reason, 'err');
-  } finally {
-    await rpc('clearReferer').catch(() => { /* ignore */ });
-  }
-
-  let out = replaceUrls(result.html, dataUris, result.baseUrl);
-  out = stripLazyAttrs(out);
-  out = await inlineStylesheets(out, result.baseUrl);
-  out = await inlineStyleUrls(out, result.baseUrl);
-  out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<script\b[^>]*\/>/gi, '')
-    .replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
-  out = injectLightbox(out);
+  // 先把图片地址换成短占位符，页面骨架（样式表、图标字体）就能和图片下载并行处理；
+  // 最后一步再把 data URI 一次性填回去，避免对几十 MB 的大字符串反复做全文替换
+  const allUrls = [...blobUrls, ...list];
+  const tMask = Date.now();
+  const masked = stripLazyAttrs(maskUrls(result.html, allUrls));
+  log('⏱ 地址占位符化 ' + elapsed(tMask));
+  const markupTask = finalizeMarkup(masked, result.baseUrl);
+  const tPar = Date.now();
+  const imgTask = (async () => {
+    try { return await downloadImages(list, fetchImageLoose, 0.45, 0.4); }
+    finally { await rpc('clearReferer').catch(() => { /* ignore */ }); log('⏱ 图片下载 ' + elapsed(tPar)); }
+  })();
+  const timedMarkup = markupTask.then((r) => { log('⏱ 页面骨架（样式表/资源）' + elapsed(tPar)); return r; });
+  const [dl, markup] = await Promise.all([imgTask, timedMarkup]);
 
   progress(0.95);
-  await downloadHtml(out, fname);
+  const tSave = Date.now();
+  const datas = allUrls.map((u) => (result.blobs && result.blobs[u]) || dl.get(u));
+  await downloadHtml(unmask(markup, datas), fname);
+  log('⏱ 回填并保存 ' + elapsed(tSave));
   progress(1);
 }
 
-
 /* ---------- 工具函数 ---------- */
+const FETCH_TIMEOUT = 25000;   // 单个请求（含读完响应体）的上限，防止一个卡死的请求拖住整条流水线
+const IMG_CONCURRENCY = 12;    // Chrome 对同一域名 HTTP/1.1 限 6 连接，多域名 / h2 时更高并发才有收益
+
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  });
+}
+
+/* 保序的并发池 */
+async function mapPool(items, n, fn) {
+  const res = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      res[i] = await fn(items[i], i);
+    }
+  }));
+  return res;
+}
+
+/* 超时 / 网络抖动 / 5xx / 429 属于瞬时错误，值得重试一次；403、404、防盗链占位图等重试没意义 */
+function isTransient(e) {
+  return !!e && (e.name === 'TimeoutError' || e.name === 'TypeError' || /^HTTP (5\d\d|429)$/.test(e.message));
+}
+async function withRetry(fn) {
+  try { return await fn(); }
+  catch (e) {
+    if (!isTransient(e)) throw e;
+    return await fn();
+  }
+}
+
+/* 并发下载图片，返回 Map(url → data URI)；失败的用占位图，单张失败不影响整篇 */
+async function downloadImages(list, fetcher, p0, span) {
+  const results = new Map();
+  const failReasons = new Map();
+  let done = 0, ok = 0;
+  await mapPool(list, IMG_CONCURRENCY, async (u) => {
+    try {
+      results.set(u, await withRetry(() => fetcher(u)));
+      ok++;
+    } catch (e) {
+      results.set(u, PLACEHOLDER_IMG);
+      const key = hostOf(u) + ': ' + e.message;
+      failReasons.set(key, (failReasons.get(key) || 0) + 1);
+    }
+    done++;
+    if (done % 10 === 0 || done === list.length) {
+      progress(p0 + span * done / Math.max(1, list.length));
+      log('下载进度: ' + done + '/' + list.length);
+    }
+  });
+  log('图片下载完成: 成功 ' + ok + ', 占位替代 ' + (list.length - ok), ok || !list.length ? 'ok' : 'err');
+  for (const [reason, n] of [...failReasons].slice(0, 5)) log('  失败原因 [x' + n + ']: ' + reason, 'err');
+  return results;
+}
+
 async function fetchText(url) {
-  const resp = await fetch(url, { credentials: 'include' });
+  const resp = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(60000) });
   if (!resp.ok) throw new Error(`页面请求失败 HTTP ${resp.status}`);
   return resp.text();
 }
@@ -256,31 +305,25 @@ function collectImageUrls(html, baseUrl) {
 }
 
 async function fetchImage(url) {
-  const resp = await fetch(url, { credentials: 'include' });
+  const resp = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(FETCH_TIMEOUT) });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   // 正常图片不会重定向；被 302 到占位图说明 Referer 注入未生效
   if (resp.redirected) throw new Error('被重定向到防盗链占位图');
   const blob = await resp.blob();
   if (!blob.type.startsWith('image/')) throw new Error('非图片: ' + blob.type);
-  return await new Promise((res, rej) => {
-    const fr = new FileReader();
-    fr.onload = () => res(fr.result);
-    fr.onerror = rej;
-    fr.readAsDataURL(blob);
-  });
+  return blobToDataUrl(blob);
 }
 
-// 头像类图片失败时自动回退到站内默认头像
+// 头像类图片失败时自动回退到站内默认头像。缓存的是 Promise，并发时同一个默认头像只请求一次
 async function fetchImageWithFallback(url, cache) {
   try {
     return await fetchImage(url);
   } catch (e) {
     const fb = avatarFallbackUrl(url);
     if (!fb) throw e;
-    if (cache.has(fb)) return cache.get(fb);
-    const d = await fetchImage(fb);
-    cache.set(fb, d);
-    return d;
+    let p = cache.get(fb);
+    if (!p) { p = fetchImage(fb); cache.set(fb, p); }
+    return p;
   }
 }
 
@@ -305,7 +348,7 @@ function absolutizeCssUrls(css, cssUrl) {
 /* 样式表必须是真的 CSS：SPA 站点对不存在的路径会回退成 index.html（HTTP 200），
  * 直接内嵌会把整份 HTML 塞进 <style>，页面样式全丢。 */
 async function fetchCss(url) {
-  const resp = await fetch(url, { credentials: 'include' });
+  const resp = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(20000) });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const text = await resp.text();
   const type = (resp.headers.get('content-type') || '').toLowerCase();
@@ -323,25 +366,17 @@ async function fetchCssAssets(urls, cache) {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const blob = await resp.blob();
     if (!blob.size || /^text\/html/i.test(blob.type)) throw new Error('无效资源');
-    return await new Promise((res, rej) => {
-      const fr = new FileReader();
-      fr.onload = () => res(fr.result);
-      fr.onerror = rej;
-      fr.readAsDataURL(blob);
-    });
+    return blobToDataUrl(blob);
   };
-  await Promise.all(Array.from({ length: 16 }, async () => {
-    while (queue.length) {
-      const u = queue.shift();
-      try {
-        // http 直接升级成 https，省掉一次 301 跳转（慢站点上能省一半时间）；升级失败再回退原地址
-        try { cache.set(u, await get(u.replace(/^http:/, 'https:'))); }
-        catch (e) { if (!/^http:/.test(u)) throw e; cache.set(u, await get(u)); }
-      } catch { cache.set(u, null); }
-      done++;
-      if (done % 50 === 0 && done < total) log('样式资源进度: ' + done + '/' + total);
-    }
-  }));
+  await mapPool(queue, 16, async (u) => {
+    try {
+      // http 直接升级成 https，省掉一次 301 跳转（慢站点上能省一半时间）；升级失败再回退原地址
+      try { cache.set(u, await get(u.replace(/^http:/, 'https:'))); }
+      catch (e) { if (!/^http:/.test(u)) throw e; cache.set(u, await get(u)); }
+    } catch { cache.set(u, null); }
+    done++;
+    if (done % 50 === 0 && done < total) log('样式资源进度: ' + done + '/' + total);
+  });
 }
 
 /* 内嵌所有 <style> 里的 url()。同一资源（如雪碧图被引用几十次）只存一份到 :root 的
@@ -351,7 +386,7 @@ async function inlineStyleUrls(html, baseUrl) {
   const styleRe = /(<style\b([^>]*)>)([\s\S]*?)(<\/style>)/gi;
   const resolve = (u, base) => {
     u = decodeEntities(u).trim();
-    if (!u || /^(data:|blob:|#|about:)/i.test(u)) return null;
+    if (!u || /^(data:|blob:|#|about:)/i.test(u) || u.includes('\u0001')) return null; // \u0001 = 图片占位符，稍后统一回填
     try { const a = new URL(u, base).href; return /^https?:/.test(a) ? a : null; } catch { return null; }
   };
   const baseOf = (attrs) => ((attrs.match(/\bdata-src="([^"]+)"/) || [])[1]) || baseUrl;
@@ -395,21 +430,35 @@ async function inlineStyleUrls(html, baseUrl) {
 }
 
 async function inlineStylesheets(html, pageUrl) {
+  const links = collectStyleLinks(html, pageUrl);
+  // 样式表之间互不依赖，并行拉取；替换仍按原顺序做
+  const fetched = await Promise.all(links.map(({ url }) =>
+    fetchCss(url).then((css) => ({ css: absolutizeCssUrls(css, url) }), (error) => ({ error }))));
   let out = html;
-  for (const { tag, url } of collectStyleLinks(html, pageUrl)) {
-    try {
-      const css = absolutizeCssUrls(await fetchCss(url), url);
-      out = out.split(tag).join(`<style data-src="${url}">\n${css}\n</style>`);
-    } catch (e) {
+  links.forEach(({ tag, url }, i) => {
+    const r = fetched[i];
+    if (r.error) {
       // 拉不到/不是 CSS 的样式表直接移除，避免打开时报错
-      log('⚠ 样式表未能内嵌: ' + url + '（' + e.message + '）', 'err');
+      log('⚠ 样式表未能内嵌: ' + url + '（' + r.error.message + '）', 'err');
       out = out.split(tag).join('');
+    } else {
+      out = out.split(tag).join('<style data-src="' + url + '">\n' + r.css + '\n</style>');
     }
-  }
+  });
   return out;
 }
 
-const escapeRe = (s) => s.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+/* 页面骨架收尾：内嵌样式表与其资源 → 删脚本 → 注入灯箱。不依赖图片下载结果，可与下载并行 */
+async function finalizeMarkup(html, baseUrl) {
+  let out = await inlineStylesheets(html, baseUrl);
+  out = await inlineStyleUrls(out, baseUrl);
+  // 移除页面全部脚本（含内联）。Discuz 内联脚本依赖已删掉的外部脚本，
+  // 保留会在本地打开时抛 ReferenceError（HTMLNODE / initSearchmenu 等）
+  out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<script\b[^>]*\/>/gi, '')
+    .replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
+  return injectLightbox(out);
+}
 
 /* 同一个资源在页面里可能是绝对地址、协议相对地址（//cdn/x.png）、或者把 & 转义成
  * &amp; 的形态。收集时已经还原成绝对地址，替换时每种形态都得试，否则整张图会漏掉。 */
@@ -420,30 +469,47 @@ function urlVariants(u) {
   return [...set];
 }
 
-function replaceUrls(html, dataUris, baseUrl) {
+/* 图片地址 → 短占位符（\u0001PV<序号>\u0001），最后 unmask 一次性回填 data URI。
+ * 以前每张图都对已经塞满 base64 的整份 HTML 做全文正则替换，页面越大越慢（平方级）；
+ * 现在全文替换只发生在不含图片数据的小字符串上。长地址优先，避免短地址误伤长地址的前缀。 */
+function maskUrls(html, urls) {
+  const order = urls.map((_, i) => i).sort((a, b) => urls[b].length - urls[a].length);
   let out = html;
-  for (const [u, d] of dataUris) {
+  for (const i of order) {
+    const u = urls[i];
+    const tok = '\u0001PV' + i + '\u0001';
     for (const v of urlVariants(u)) {
-      if (v) out = out.replace(new RegExp(escapeRe(v), 'g'), d);
+      if (v && out.includes(v)) out = out.split(v).join(tok);
     }
     try {
       const rel = new URL(u).pathname.replace(/^\//, '');
-      if (rel) out = out.replace(new RegExp(escapeRe(rel), 'g'), d);
+      if (rel && out.includes(rel)) out = out.split(rel).join(tok);
     } catch { /* ignore */ }
   }
   return out;
 }
 
+/* 回填占位符，返回 Blob 的 parts 数组（不拼成一个巨型字符串，大页面也不会撞字符串长度上限） */
+function unmask(html, datas) {
+  const parts = html.split(/\u0001PV(\d+)\u0001/);
+  for (let i = 1; i < parts.length; i += 2) parts[i] = datas[+parts[i]] || PLACEHOLDER_IMG;
+  return parts;
+}
+
+/* 作用在占位符化之后的 HTML 上：属性值是 data URI 或图片占位符 */
+const LAZY_VAL = '(?:data:image[^"]*|\\u0001PV\\d+\\u0001)';
 function fixLazyLoad(html) {
+  const test = new RegExp('\\b(?:zoomfile|file)="' + LAZY_VAL + '"');
+  const grab = new RegExp('\\b(?:zoomfile|file)="(' + LAZY_VAL + ')"');
+  const drop = new RegExp('\\s*(?:zoomfile|file)="' + LAZY_VAL + '"', 'g');
   return html.replace(/<img\b[^>]*>/g, (tag) => {
-    if (!/\b(zoomfile|file)="data:image/.test(tag)) return tag;
-    const real = tag.match(/\b(?:zoomfile|file)="(data:image[^"]+)"/);
+    if (!test.test(tag)) return tag;
+    const real = tag.match(grab);
     if (!real) return tag;
     let nt = /\bsrc="[^"]*"/.test(tag)
-      ? tag.replace(/\bsrc="[^"]*"/, `src="${real[1]}"`)
-      : tag.replace(/^<img\b/, `<img src="${real[1]}"`);
-    nt = nt.replace(/\s*(zoomfile|file)="data:image[^"]*"/g, '');
-    return nt;
+      ? tag.replace(/\bsrc="[^"]*"/, () => 'src="' + real[1] + '"')
+      : tag.replace(/^<img\b/, () => '<img src="' + real[1] + '"');
+    return nt.replace(drop, '');
   });
 }
 
@@ -561,8 +627,8 @@ td.t_f img{cursor:zoom-in;}
   return html.replace(/<\/body>/i, lb + '\n</body>');
 }
 
-async function downloadHtml(html, fname) {
-  const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+async function downloadHtml(parts, fname) {
+  const blobUrl = URL.createObjectURL(new Blob(Array.isArray(parts) ? parts : [parts], { type: 'text/html;charset=utf-8' }));
   const names = [...new Set([safeName(fname), fallbackName()].filter(Boolean))];
   try {
     return (await rpc('download', { blobUrl, names })).name;
@@ -572,12 +638,13 @@ async function downloadHtml(html, fname) {
 }
 
 /* ---------- 静态抓取：直接请求服务端返回的 HTML（Discuz 论坛等） ---------- */
-async function saveStatic(threadUrl, fname) {
+async function saveStatic(threadUrl, fname, firstHtml) {
   log('开始抓取页面…', 'hl');
   progress(0.02);
 
   // 1. 抓主页面（扩展的 fetch 不受 CORS 限制，Cookie 自动携带）
-  let html = await fetchText(threadUrl);
+  const tPages = Date.now();
+  let html = firstHtml || await fetchText(threadUrl);
   // 年龄门检测（Discuz 18+ gate）
   if (/agree_submit/.test(html)) {
     log('检测到年龄确认门，自动通过…');
@@ -595,21 +662,25 @@ async function saveStatic(threadUrl, fname) {
   const pages = [...new Set([...html.matchAll(/[?&]page=(\d+)/g)].map((m) => +m[1]))];
   const maxPage = pages.length ? Math.max(...pages) : 1;
   const pageHtmls = [html];
-  for (let p = 2; p <= maxPage; p++) {
+  if (maxPage > 1) {
+    // 分页互不依赖，4 路并行拉取，结果仍按页码顺序拼接
+    let fetched = 1;
     const sep = threadUrl.includes('?') ? '&' : '?';
-    pageHtmls.push(await fetchText(`${threadUrl}${sep}page=${p}`));
-    log(`第 ${p}/${maxPage} 页抓取完成`);
-    progress(0.08 + 0.04 * p / maxPage);
+    const rest = await mapPool(Array.from({ length: maxPage - 1 }, (_, k) => k + 2), 4, async (p) => {
+      const h = await fetchText(`${threadUrl}${sep}page=${p}`);
+      fetched++;
+      log(`第 ${fetched}/${maxPage} 页抓取完成`);
+      progress(0.08 + 0.04 * fetched / maxPage);
+      return h;
+    });
+    pageHtmls.push(...rest);
   }
   html = pageHtmls.join('\n<!-- PAGE BREAK -->\n');
+  log('⏱ 抓取页面 ' + elapsed(tPages) + '（共 ' + maxPage + ' 页，' + (html.length / 1048576).toFixed(1) + ' MB）');
 
   // 3. 收集图片 URL
-  const urls = collectImageUrls(html, threadUrl);
-  log(`发现 ${urls.size} 个图片，开始下载…`);
-  const list = [...urls];
-  const dataUris = new Map();
-  const fallbackCache = new Map();
-  let done = 0, ok = 0;
+  const list = [...collectImageUrls(html, threadUrl)];
+  log(`发现 ${list.length} 个图片，开始下载…`);
 
   // 4. 给图片域名临时注入 Referer（防盗链服务器要求请求必须带 Referer，
   //    扩展页面的 fetch 默认不带，所以用 DNR 会话规则补上，下载完自动删）
@@ -621,55 +692,25 @@ async function saveStatic(threadUrl, fname) {
     log('⚠ 无法设置 Referer 规则，部分图片可能下载失败', 'err');
   }
 
-  // 5. 并发下载（5 路），记录失败原因
-  try {
-    const queue = [...list];
-    const failReasons = new Map();
-    const workers = Array.from({ length: 5 }, async () => {
-      while (queue.length) {
-        const u = queue.shift();
-        try {
-          const d = await fetchImageWithFallback(u, fallbackCache);
-          dataUris.set(u, d);
-          ok++;
-        } catch (e) {
-          // 单张图失败不阻塞整篇，用内联占位图替换
-          dataUris.set(u, PLACEHOLDER_IMG);
-          const host = new URL(u).hostname;
-          const key = `${host}: ${e.message}`;
-          failReasons.set(key, (failReasons.get(key) || 0) + 1);
-        }
-        done++;
-        if (done % 10 === 0 || done === list.length) {
-          progress(0.15 + 0.7 * done / list.length);
-          log(`下载进度: ${done}/${list.length}`);
-        }
-      }
-    });
-    await Promise.all(workers);
-    log(`图片下载完成: 成功 ${ok}, 占位替代 ${list.length - ok}`, ok ? 'ok' : 'err');
-    for (const [reason, n] of [...failReasons].slice(0, 5)) {
-      log(`  失败原因 [x${n}]: ${reason}`, 'err');
-    }
-  } finally {
-    await rpc('clearReferer').catch(() => { /* ignore */ });
-  }
+  // 5. 图片地址先换成占位符 → 页面骨架（样式表 / 图标字体 / 删脚本 / 灯箱）与图片下载并行 →
+  //    最后一次性回填 data URI
+  const tMask = Date.now();
+  const masked = fixLazyLoad(maskUrls(html, list));
+  log('⏱ 地址占位符化 ' + elapsed(tMask));
+  const markupTask = finalizeMarkup(masked, threadUrl);
+  const fallbackCache = new Map();
+  const tPar = Date.now();
+  const imgTask = (async () => {
+    try { return await downloadImages(list, (u) => fetchImageWithFallback(u, fallbackCache), 0.15, 0.7); }
+    finally { await rpc('clearReferer').catch(() => { /* ignore */ }); log('⏱ 图片下载 ' + elapsed(tPar)); }
+  })();
+  const timedMarkup = markupTask.then((r) => { log('⏱ 页面骨架（样式表/资源）' + elapsed(tPar)); return r; });
+  const [dl, markup] = await Promise.all([imgTask, timedMarkup]);
   progress(0.9);
 
-  // 6. 替换引用 → 修懒加载 → 内联CSS → 清脚本 → 注入灯箱
-  let out = replaceUrls(html, dataUris, threadUrl);
-  out = fixLazyLoad(out);
-  out = await inlineStylesheets(out, threadUrl);
-  out = await inlineStyleUrls(out, threadUrl);
-  // 移除页面全部脚本（含内联）。Discuz 内联脚本依赖已删掉的外部脚本，
-  // 保留会在本地打开时抛 ReferenceError（HTMLNODE / initSearchmenu 等）
-  out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<script\b[^>]*\/>/gi, '')
-    .replace(/<noscript>[\s\S]*?<\/noscript>/gi, '');
-  out = injectLightbox(out);
-
-  // 7. 下载为文件
-  await downloadHtml(out, fname);
+  // 6. 回填 → 下载为文件
+  const tSave = Date.now();
+  await downloadHtml(unmask(markup, list.map((u) => dl.get(u))), fname);
+  log('⏱ 回填并保存 ' + elapsed(tSave));
   progress(1);
 }
-
