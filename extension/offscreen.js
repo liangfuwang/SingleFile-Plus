@@ -259,7 +259,7 @@ async function downloadImages(list, fetcher, p0, span) {
       ok++;
     } catch (e) {
       results.set(u, PLACEHOLDER_IMG);
-      const key = hostOf(u) + ': ' + e.message;
+      const key = hostOf(u) + ': ' + e.message + '（例: ' + u.slice(0, 120) + '）';
       failReasons.set(key, (failReasons.get(key) || 0) + 1);
     }
     done++;
@@ -268,8 +268,11 @@ async function downloadImages(list, fetcher, p0, span) {
       log('下载进度: ' + done + '/' + list.length);
     }
   });
-  log('图片下载完成: 成功 ' + ok + ', 占位替代 ' + (list.length - ok), ok || !list.length ? 'ok' : 'err');
-  for (const [reason, n] of [...failReasons].slice(0, 5)) log('  失败原因 [x' + n + ']: ' + reason, 'err');
+  const failed = list.length - ok;
+  // 个别图片本身在站点上就打不开（如默认头像返回 400），属正常现象，不当作错误；失败过半才标红
+  const bad = failed > list.length / 2;
+  log('图片下载完成: 成功 ' + ok + (failed ? '，' + failed + ' 张站点端无法获取，已用占位图' : ''), bad ? 'err' : 'ok');
+  for (const [reason, n] of [...failReasons].slice(0, 5)) log('  原因 [x' + n + ']: ' + reason, bad ? 'err' : '');
   return results;
 }
 
@@ -481,9 +484,17 @@ function maskUrls(html, urls) {
     for (const v of urlVariants(u)) {
       if (v && out.includes(v)) out = out.split(v).join(tok);
     }
+    // 页面里的相对地址（/a/b.png、a/b.png）。必须带上 query，并要求前后都是边界：
+    // 否则 /avatar/X 会误伤 /avatar/X_132 里的前缀，把别的图片地址撕成 "域名/占位符"
     try {
-      const rel = new URL(u).pathname.replace(/^\//, '');
-      if (rel && out.includes(rel)) out = out.split(rel).join(tok);
+      const { pathname, search } = new URL(u);
+      const rel = pathname.replace(/^\//, '') + search;
+      if (!rel || rel === '/') continue;
+      for (const r of urlVariants(rel)) {
+        if (!out.includes(r)) continue;
+        const re = new RegExp('(^|[\\s"\'(=,])(?:\\.?\\/)?' + r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[\\s"\')<>,])', 'g');
+        out = out.replace(re, (all, pre) => pre + tok);
+      }
     } catch { /* ignore */ }
   }
   return out;

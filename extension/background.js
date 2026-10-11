@@ -209,7 +209,7 @@ async function waitForTabReady(tabId, timeout = 40000) {
 
 /* 这段在目标标签页里执行，必须自包含（executeScript 会把它序列化过去） */
 async function captureRenderedDom(opts) {
-  const cfg = Object.assign({ minWait: 3000, maxWait: 30000, stepDelay: 240, settleDelay: 600, settleRounds: 5, maxScrollMs: 120000, maxRounds: 400 }, opts || {});
+  const cfg = Object.assign({ minWait: 1000, maxWait: 30000, stepDelay: 150, settleDelay: 400, settleRounds: 3, maxScrollMs: 120000, maxRounds: 400 }, opts || {});
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const textLen = () => (document.body && document.body.innerText ? document.body.innerText.trim().length : 0);
@@ -270,14 +270,14 @@ async function captureRenderedDom(opts) {
       await sleep(cfg.settleDelay);
     } else {
       stable = 0;
-      el.scrollTop = Math.min(maxTop, el.scrollTop + Math.max(240, Math.floor(el.clientHeight * 0.8)));
+      el.scrollTop = Math.min(maxTop, el.scrollTop + Math.max(240, el.clientHeight));
       await sleep(cfg.stepDelay);
     }
   }
   if (!stopReason) stopReason = stable >= cfg.settleRounds ? 'stable' : round >= cfg.maxRounds ? 'rounds' : 'timeout';
   const scrollInfo = { stopReason, rounds: round, scrollMs: Date.now() - scrollStart };
   if (scroller.el && scroller.el.isConnected) scroller.el.scrollTop = 0;
-  await sleep(900);
+  await sleep(400);
 
   // 克隆 DOM 再处理，避免改动用户正在看的页面
   const originals = [...document.querySelectorAll('img')];
@@ -286,7 +286,8 @@ async function captureRenderedDom(opts) {
   const blobs = {};
   const blobJobs = [];
   for (let i = 0; i < originals.length; i++) {
-    const src = originals[i].currentSrc || originals[i].src || originals[i].getAttribute('src') || '';
+    // 不能用 img.src：src="" 时 Chrome 会把它解析成页面自身的地址，之后会被当成图片去下载（拿到 text/html）
+    const src = originals[i].currentSrc || originals[i].getAttribute('src') || '';
     if (src && cloned[i]) cloned[i].setAttribute('src', src);
     if (src.startsWith('blob:') && !(src in blobs)) {
       blobs[src] = null;
@@ -327,7 +328,7 @@ async function capture({ url }) {
       target: { tabId },
       func: captureRenderedDom,
       // 标签页在后台时定时器会被降频到约 1 秒一次，滚动上限放宽以免长文档被截断
-      args: [{ minWait: 3000, stepDelay: 240, settleDelay: 600, settleRounds: 5, maxScrollMs: 240000 }],
+      args: [{ maxScrollMs: 240000 }],
     });
     const result = injected && injected[0] && injected[0].result;
     if (result && result.scrollInfo) {
