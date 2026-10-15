@@ -11,3 +11,6 @@ node_modules/
 
 # 本地交接记录（个人工作记录，不入库）
 HANDOFF.md
+
+# 本地 Agent 指令（含本机路径，不入库）
+AGENTS.md
