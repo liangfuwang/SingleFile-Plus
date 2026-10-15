@@ -11,7 +11,7 @@
 1. 打开 Chrome，地址栏输入 `chrome://extensions/`
 2. 右上角打开 **开发者模式**
 3. 点左上角 **加载已解压的扩展程序**
-4. 选择本目录 `~/VibeCoding/PageVault/extension`
+4. 选择本目录 `~/VibeCoding/SingleFile-Plus/extension`
 5. （可选）点浏览器右上角拼图图标 🧩，把「SingleFile Plus 网页存档」钉到工具栏
 
 ## 使用
@@ -56,6 +56,6 @@
 ## 命令行版本（备用）
 
 ```bash
-cd ~/VibeCoding/PageVault
+cd ~/VibeCoding/SingleFile-Plus
 NODE_USE_ENV_PROXY=1 node save-page.js "帖子URL" "文件名.html"
 ```
