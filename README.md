@@ -1,4 +1,4 @@
-# PageVault — 网页 → 单文件 HTML 保存工具（支持登录页与图片防盗链）
+# SingleFile Plus — 网页 → 单文件 HTML 保存工具（支持登录页与图片防盗链）
 
 ## 问题原因
 
@@ -49,9 +49,9 @@ PV_USER=xxx PV_PASS=yyy node save-page.js \
 
 ## 与 SingleFile 的对比
 
-[SingleFile](https://github.com/gildas-lormeau/SingleFile) 是成熟的通用网页存档扩展，本项目名称与之区分，定位也不同：PageVault 不是它的替代品，而是针对"需要登录 + 图床防盗链 + Discuz 论坛"这类场景的补充。
+[SingleFile](https://github.com/gildas-lormeau/SingleFile) 是成熟的通用网页存档扩展，SingleFile Plus 的名字致敬它，但定位不同：并不是它的替代品，而是针对"需要登录 + 图床防盗链 + Discuz 论坛"这类场景的补充。
 
-| 维度 | SingleFile | PageVault |
+| 维度 | SingleFile | SingleFile Plus |
 |------|-----------|-----------|
 | 定位 | 通用网页存档，覆盖任意网站 | 专注论坛帖 / SPA 文档的离线存档 |
 | 成熟度 | 长期维护，社区大，多浏览器支持 | 个人项目，仅 Chrome（MV3） |
@@ -66,7 +66,7 @@ PV_USER=xxx PV_PASS=yyy node save-page.js \
 | 其他功能 | 批量保存标签页、自动保存、标注、压缩、云端上传等 | 无，保持精简 |
 | 依赖 | 较多功能模块 | 纯原生 JS，无外部依赖 |
 
-选择建议：普通网页、需要标注/批量/云同步，用 SingleFile；需要登录的论坛帖、带防盗链图床、多页合并，用 PageVault。
+选择建议：普通网页、需要标注/批量/云同步，用 SingleFile；需要登录的论坛帖、带防盗链图床、多页合并，用 SingleFile Plus。
 
 ## 文件说明
 

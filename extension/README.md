@@ -1,4 +1,4 @@
-# PageVault 网页存档 — Chrome 插件
+# SingleFile Plus 网页存档 — Chrome 插件
 
 把网页一键保存为**单文件 HTML**：图片 base64 内嵌、离线可看、点击放大。抓取方式自动判断，无需手动选择：
 
@@ -12,7 +12,7 @@
 2. 右上角打开 **开发者模式**
 3. 点左上角 **加载已解压的扩展程序**
 4. 选择本目录 `~/VibeCoding/PageVault/extension`
-5. （可选）点浏览器右上角拼图图标 🧩，把「PageVault 网页存档」钉到工具栏
+5. （可选）点浏览器右上角拼图图标 🧩，把「SingleFile Plus 网页存档」钉到工具栏
 
 ## 使用
 

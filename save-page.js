@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * save-page.js — PageVault：抓取 Discuz 论坛帖子并生成图片内嵌的单文件 HTML
+ * save-page.js — SingleFile Plus：抓取 Discuz 论坛帖子并生成图片内嵌的单文件 HTML
  *
  * 用法: node save-page.js <帖子URL> [输出文件名.html]
  * 流程: 登录(如需) → 过年龄门(如需) → 抓页面 → 带Referer下载所有图片
