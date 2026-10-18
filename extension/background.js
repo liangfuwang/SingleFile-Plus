@@ -209,7 +209,11 @@ async function waitForTabReady(tabId, timeout = 40000) {
 
 /* 这段在目标标签页里执行，必须自包含（executeScript 会把它序列化过去） */
 async function captureRenderedDom(opts) {
-  const cfg = Object.assign({ minWait: 1000, maxWait: 30000, stepDelay: 150, settleDelay: 400, settleRounds: 3, maxScrollMs: 120000, maxRounds: 400 }, opts || {});
+  const cfg = Object.assign({
+    minWait: 1000, maxWait: 30000, stepDelay: 150, settleDelay: 400,
+    quietMs: 3000, loadingMaxMs: 20000, maxScrollMs: 120000, maxRounds: 6000,
+    expand: true, clicksPerScan: 30, reportEvery: 10000,
+  }, opts || {});
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const textLen = () => (document.body && document.body.innerText ? document.body.innerText.trim().length : 0);
@@ -246,36 +250,109 @@ async function captureRenderedDom(opts) {
     return { el: best, room };
   };
 
+  // 评论区里的折叠入口：楼中楼"展开剩余 N 条回复"、被截断的长评论"展开全文"、"加载更多"按钮。
+  // 只点文字完全匹配的元素；不点会跳走的链接，也不点"收起"。
+  const EXPAND_RE = /^(?:展开(?:剩余|全部|更多)?\d*条(?:回复|评论)|查看(?:全部|剩余|更多)?\d*条(?:回复|评论)|共\d+条回复|展开全文|查看全文|阅读全文|(?:点击)?(?:加载|查看|展开|显示)更多(?:评论|回复)?|更多(?:评论|回复)|(?:load|show|view|see)more(?:comments|replies)?|(?:show|view)\d*(?:more)?repl(?:y|ies))$/i;
+  const HINT_RE = /展开|查看|加载|更多|全文|回复|more|repl/i;
+  const LOADING_RE = /^(?:加载中|正在加载|loading)[.。…]*$/i;
+  const norm = (s) => s.replace(/[\s>›»▸▾▼↓∨]+/g, '');
+  const rendered = (el) => el.getClientRects().length > 0;
+  const clickedState = new WeakMap(); // 元素 → 上次点击时的文字和页面高度，防止对同一个按钮反复点
+  // 扫一遍文本节点：点开折叠入口，顺便看页面上有没有"加载中"
+  const scan = (docH) => {
+    let clicked = 0, loading = false;
+    if (!document.body) return { clicked, loading };
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const raw = node.nodeValue;
+      if (!raw || raw.length > 40) continue;
+      const p = node.parentElement;
+      if (!p) continue;
+      const t = norm(raw);
+      if (LOADING_RE.test(t)) { if (!loading && rendered(p)) loading = true; continue; }
+      if (!cfg.expand || clicked >= cfg.clicksPerScan || !HINT_RE.test(t)) continue;
+      const target = p.closest('button,[role="button"],a') || p;
+      if (!EXPAND_RE.test(norm(target.textContent || ''))) continue;
+      if (target.disabled || target.getAttribute('aria-disabled') === 'true' || !rendered(target)) continue;
+      const link = target.closest('a[href]');
+      if (link && !/^(?:#|javascript:)/i.test(link.getAttribute('href') || '')) continue;
+      const prev = clickedState.get(target);
+      // 同一个按钮：文字变了（剩余条数减少）或页面长高了（"加载更多"生效后按钮还在）才再点
+      if (prev && (prev.n >= 50 || (prev.text === t && prev.h === docH))) continue;
+      clickedState.set(target, { text: t, h: docH, n: prev ? prev.n + 1 : 1 });
+      try { target.click(); clicked++; } catch { /* ignore */ }
+    }
+    return { clicked, loading };
+  };
+  const report = (msg) => {
+    try { if (typeof chrome !== 'undefined' && chrome.runtime) chrome.runtime.sendMessage({ target: 'bg', type: 'log', msg }).catch(() => {}); } catch { /* ignore */ }
+  };
+
   const nodesBefore = document.querySelectorAll('*').length;
   const scrollStart = Date.now();
   const scrollDeadline = scrollStart + cfg.maxScrollMs;
+  let lastMutation = scrollStart;
+  const mo = new MutationObserver(() => { lastMutation = Date.now(); });
+  if (document.body) mo.observe(document.body, { childList: true, subtree: true });
   let scroller = findScroller();
-  let stable = 0, lastH = -1, lastTop = -1, round = 0;
+  let round = 0, clicks = 0, lastH = -1, lastGrow = scrollStart, lastClick = 0, arrivedAt = scrollStart;
+  let wasAtBottom = false, nudged = false, wasHidden = false, lastReport = scrollStart;
   let stopReason = ''; // stable 正常到底 / no-scroll 无需滚动 / rounds 轮数上限 / timeout 超时
-  while (stable < cfg.settleRounds && round < cfg.maxRounds && Date.now() < scrollDeadline) {
+  while (true) {
+    if (round >= cfg.maxRounds) { stopReason = 'rounds'; break; }
+    if (Date.now() >= scrollDeadline) { stopReason = 'timeout'; break; }
     round++;
+    if (document.hidden) wasHidden = true;
     if (!scroller.el || !scroller.el.isConnected || round % 20 === 1) scroller = findScroller();
     const el = scroller.el;
     if (!el) { stopReason = 'no-scroll'; break; }
     const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    if (maxTop <= 4) { stopReason = 'no-scroll'; break; }
+    if (el.scrollHeight !== lastH) { lastH = el.scrollHeight; lastGrow = Date.now(); nudged = false; }
+    if (Date.now() - lastReport >= cfg.reportEvery) {
+      lastReport = Date.now();
+      report('滚动中：' + round + ' 轮 / ' + ((lastReport - scrollStart) / 1000).toFixed(0) + ' 秒，页面高度 ' + lastH + ' px' + (clicks ? '，已点开 ' + clicks + ' 处折叠' : ''));
+    }
     // 必须真的滚到底之后才允许判定"稳定"。只按高度不变就收手的话，
-    // 因为步长是 0.8 屏，会在离底部还差一段的地方就退出，懒加载的内容全漏掉。
+    // 会在离底部还差一段的地方就退出，懒加载的内容全漏掉。
     const atBottom = el.scrollTop >= maxTop - 4;
-    if (atBottom) {
-      if (el.scrollHeight === lastH && el.scrollTop === lastTop) stable++; else stable = 0;
-      lastH = el.scrollHeight;
-      lastTop = el.scrollTop;
-      el.scrollTop = el.scrollHeight;
-      await sleep(cfg.settleDelay);
-    } else {
-      stable = 0;
+    if (!atBottom) {
+      wasAtBottom = false;
       el.scrollTop = Math.min(maxTop, el.scrollTop + Math.max(240, el.clientHeight));
+      if (round % 5 === 0) {
+        const s = scan(lastH);
+        if (s.clicked) { clicks += s.clicked; lastClick = Date.now(); }
+      }
+      await sleep(cfg.stepDelay);
+      continue;
+    }
+    if (!wasAtBottom) { wasAtBottom = true; arrivedAt = Date.now(); }
+    const s = scan(lastH);
+    if (s.clicked) {
+      clicks += s.clicked;
+      lastClick = Date.now();
+      await sleep(cfg.settleDelay);
+      continue;
+    }
+    if (maxTop <= 4 && round === 1 && !s.loading) { stopReason = 'no-scroll'; break; }
+    // 到底后不能只看高度：评论接口常要 1~3 秒才返回，等的这段时间高度不变。
+    // 要求高度、DOM、点击都安静够 quietMs，且页面上没有"加载中"才算到底；
+    // 一直转圈或 DOM 一直在跳的页面，最多等 loadingMaxMs。
+    const now = Date.now();
+    const idleFrom = Math.max(lastGrow, lastMutation, lastClick, arrivedAt);
+    if (!s.loading && now - idleFrom >= cfg.quietMs) { stopReason = 'stable'; break; }
+    if (now - Math.max(lastGrow, lastClick, arrivedAt) >= cfg.loadingMaxMs) { stopReason = 'stable'; break; }
+    // 用 IntersectionObserver 做的"滚到底加载"，哨兵一直待在视口里就不会再触发。
+    // 安静了一阵还没动静时，往回滚两屏再回到底部，让哨兵重新进入视口。
+    if (!nudged && now - idleFrom >= cfg.quietMs / 2) {
+      nudged = true;
+      el.scrollTop = Math.max(0, maxTop - el.clientHeight * 2);
       await sleep(cfg.stepDelay);
     }
+    el.scrollTop = el.scrollHeight;
+    await sleep(cfg.settleDelay);
   }
-  if (!stopReason) stopReason = stable >= cfg.settleRounds ? 'stable' : round >= cfg.maxRounds ? 'rounds' : 'timeout';
-  const scrollInfo = { stopReason, rounds: round, scrollMs: Date.now() - scrollStart };
+  mo.disconnect();
+  const scrollInfo = { stopReason, rounds: round, scrollMs: Date.now() - scrollStart, clicks, hidden: wasHidden };
   if (scroller.el && scroller.el.isConnected) scroller.el.scrollTop = 0;
   await sleep(400);
 
@@ -327,19 +404,23 @@ async function capture({ url }) {
     const injected = await chrome.scripting.executeScript({
       target: { tabId },
       func: captureRenderedDom,
-      // 标签页在后台时定时器会被降频到约 1 秒一次，滚动上限放宽以免长文档被截断
-      args: [{ maxScrollMs: 240000 }],
+      // 几百条评论的帖子要分几十页加载；标签页在后台时定时器还会被降频到约 1 秒一次，上限给足 10 分钟
+      args: [{ maxScrollMs: 600000 }],
     });
     const result = injected && injected[0] && injected[0].result;
     if (result && result.scrollInfo) {
-      const { stopReason, rounds, scrollMs } = result.scrollInfo;
+      const { stopReason, rounds, scrollMs, clicks, hidden } = result.scrollInfo;
       const sec = (scrollMs / 1000).toFixed(0);
+      const expanded = clicks ? '，点开 ' + clicks + ' 处折叠' : '';
       if (stopReason === 'rounds' || stopReason === 'timeout') {
         // 页面一直在加载新内容，是被上限截停的，不是滚到了真正的底部
         const why = stopReason === 'rounds' ? '已达滚动轮数上限（' + rounds + ' 轮）' : '已达滚动时间上限（' + sec + ' 秒）';
-        addLog('⚠ ' + why + '，页面仍在加载新内容，可能没抓全；已保存当前已渲染的部分', 'err');
+        addLog('⚠ ' + why + expanded + '，页面仍在加载新内容，可能没抓全；已保存当前已渲染的部分', 'err');
       } else {
-        addLog('滚动完成：' + rounds + ' 轮 / ' + sec + ' 秒' + (stopReason === 'no-scroll' ? '（页面无需滚动）' : '，已到页面底部'));
+        addLog('滚动完成：' + rounds + ' 轮 / ' + sec + ' 秒' + expanded + (stopReason === 'no-scroll' ? '（页面无需滚动）' : '，已到页面底部'));
+      }
+      if (hidden) {
+        addLog('⚠ 抓取时标签页在后台：不少网站在后台会暂停"滚到底加载"，内容不全的话请把该标签页留在前台重试', 'err');
       }
     }
     return result;
