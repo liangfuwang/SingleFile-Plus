@@ -1,13 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <title>SingleFile Plus</title>
-  <desc>深蓝底上的折角文档与琥珀色加号，代表将网页完整保存为一个文件。</desc>
-  <rect x="4" y="4" width="120" height="120" rx="28" fill="#163e65"/>
-  <path d="M36 22h34l24 24v54a8 8 0 0 1-8 8H36a8 8 0 0 1-8-8V30a8 8 0 0 1 8-8Z" fill="#f7fbff"/>
-  <path d="M70 22v16a8 8 0 0 0 8 8h16Z" fill="#91bde0"/>
-  <rect x="39.5" y="56.5" width="37" height="7" rx="3.5" fill="#163e65"/>
-  <rect x="39.5" y="72.5" width="27" height="7" rx="3.5" fill="#163e65"/>
-  <circle cx="94" cy="94" r="27" fill="#163e65"/>
-  <circle cx="94" cy="94" r="23" fill="#ffbd66"/>
-  <rect x="90.5" y="79.5" width="7" height="29" rx="3.5" fill="#163e65"/>
-  <rect x="79.5" y="90.5" width="29" height="7" rx="3.5" fill="#163e65"/>
+  <desc>明亮青蓝色的圆角折角文档与金黄色加号，代表将网页完整保存为一个文件。</desc>
+  <path d="M22 0h46q6 0 10 4l22 22q4 4 4 10v70q0 18-18 18H22q-18 0-18-18V18Q4 0 22 0Z" fill="#26d3ec"/>
+  <path d="M74 2v22q0 10 10 10h20q-1-5-4-8L78 4Z" fill="#b7f3ff"/>
+  <rect x="24" y="50" width="54" height="9" rx="4.5" fill="#155478"/>
+  <rect x="24" y="71" width="36" height="9" rx="4.5" fill="#155478"/>
+  <circle cx="98" cy="98" r="30" fill="#ffda5b"/>
+  <rect x="93" y="79" width="10" height="38" rx="5" fill="#155478"/>
+  <rect x="79" y="93" width="38" height="10" rx="5" fill="#155478"/>
 </svg>
