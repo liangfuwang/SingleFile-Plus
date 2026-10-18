@@ -1,16 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4f46e5"/>
-      <stop offset="1" stop-color="#9333ea"/>
-    </linearGradient>
-  </defs>
-
-  <!-- 满幅渐变背景（无留白，与其他扩展图标视觉等大） -->
-  <rect x="0" y="0" width="128" height="128" fill="url(#bg)"/>
-
-  <!-- 「贴」字主体（加大） -->
-  <text x="64" y="109" text-anchor="middle"
-        font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif"
-        font-size="118" font-weight="800" fill="#ffffff">贴</text>
+  <title>SingleFile Plus</title>
+  <desc>深蓝底上的折角文档与琥珀色加号，代表将网页完整保存为一个文件。</desc>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#163e65"/>
+  <path d="M36 22h34l24 24v54a8 8 0 0 1-8 8H36a8 8 0 0 1-8-8V30a8 8 0 0 1 8-8Z" fill="#f7fbff"/>
+  <path d="M70 22v16a8 8 0 0 0 8 8h16Z" fill="#91bde0"/>
+  <rect x="39.5" y="56.5" width="37" height="7" rx="3.5" fill="#163e65"/>
+  <rect x="39.5" y="72.5" width="27" height="7" rx="3.5" fill="#163e65"/>
+  <circle cx="94" cy="94" r="27" fill="#163e65"/>
+  <circle cx="94" cy="94" r="23" fill="#ffbd66"/>
+  <rect x="90.5" y="79.5" width="7" height="29" rx="3.5" fill="#163e65"/>
+  <rect x="79.5" y="90.5" width="29" height="7" rx="3.5" fill="#163e65"/>
 </svg>

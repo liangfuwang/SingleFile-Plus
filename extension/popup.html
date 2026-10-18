@@ -5,8 +5,8 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { width: 420px; padding: 16px; font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #1e1f24; color: #e8e8ea; }
-  h1 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
-  h1 .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; }
+  h1 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 9px; }
+  h1 .logo { width: 32px; height: 32px; flex: none; }
   label { display: block; font-size: 12px; color: #9aa0ab; margin: 10px 0 4px; }
   input[type=text] { width: 100%; padding: 8px 10px; border: 1px solid #3a3d45; border-radius: 8px; background: #2a2c33; color: #e8e8ea; font-size: 13px; outline: none; }
   input[type=text]:focus { border-color: #5b8def; }
@@ -23,7 +23,7 @@
 </style>
 </head>
 <body>
-  <h1><span class="dot"></span>SingleFile Plus 网页存档</h1>
+  <h1><img class="logo" src="icon.svg" alt="" width="32" height="32">SingleFile Plus 网页存档</h1>
   <label>页面 URL</label>
   <input type="text" id="url" placeholder="https://example.com/page">
   <label>保存文件名（自动取自网页标题，可修改）</label>
