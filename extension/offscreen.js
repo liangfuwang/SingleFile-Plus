@@ -159,6 +159,22 @@ async function saveRendered(pageUrl, fname) {
   const tCapture = Date.now();
   const result = await rpc('capture', { url: pageUrl });
   if (!result || !result.html) throw new Error('没取到渲染后的 DOM（页面可能还在加载，或被登录页拦截）');
+  // 把完整性状态留在文件里，方便复查；不能只在会被关闭的弹窗日志里提示。
+  if (result.scrollInfo) {
+    const doc = new DOMParser().parseFromString(result.html, 'text/html');
+    const meta = doc.createElement('meta');
+    meta.name = 'singlefile-plus-capture';
+    meta.content = JSON.stringify(result.scrollInfo);
+    doc.head.appendChild(meta);
+    if (result.scrollInfo.stopReason !== 'stable') {
+      const warning = doc.createElement('div');
+      warning.setAttribute('role', 'alert');
+      warning.style.cssText = 'position:relative;z-index:2147483647;padding:12px 16px;background:#fff3cd;color:#664d03;font:14px/1.6 sans-serif;border-bottom:1px solid #ffecb5';
+      warning.textContent = '⚠ 本文件可能不完整：采集时后续内容尚未加载完成或滚动被中断，仅保存了当时已显示的部分。请重新采集，并检查原页面底部。';
+      doc.body.prepend(warning);
+    }
+    result.html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+  }
   log('DOM 抓取完成: ' + (result.html.length / 1048576).toFixed(1) + ' MB', 'ok');
   log('⏱ 渲染抓取 ' + elapsed(tCapture));
   progress(0.45);

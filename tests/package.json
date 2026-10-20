@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": { "test": "node --test rendered-capture.test.cjs" },
+  "devDependencies": {
+    "@sinonjs/fake-timers": "15.4.0",
+    "jsdom": "29.1.1"
+  }
+}

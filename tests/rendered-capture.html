@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>长评论采集回归测试</title>
+<style>
+body { font: 15px/1.6 system-ui; margin: 24px; }
+button { padding: 8px 16px; }
+pre { white-space: pre-wrap; }
+iframe { width: 700px; height: 360px; border: 1px solid #aaa; }
+</style>
+<h1>长评论采集回归测试</h1>
+<p>在项目根目录运行 <code>python3 -m http.server 8765 --bind 127.0.0.1</code>，打开本页后运行。使用真实浏览器滚动、异步分页和扩展实际注入函数。</p>
+<button id="run">运行回归测试</button>
+<pre id="results">尚未运行</pre>
+<div id="fixture"></div>
+<script>
+// 在独立 iframe 中运行，每例有自己的 DOM、滚动根和计时器。
+async function runFixture(name) {
+  const list = document.getElementById('items');
+  const loader = document.getElementById('loader');
+  const scroller = name === 'nested' ? list.parentElement : document.scrollingElement;
+  let count = 0, page = 1, pending = false, navigated = false;
+  function append(n) {
+    for (let i = 0; i < n; i++) {
+      const item = document.createElement('app-comment-item');
+      item.className = 'main-comment-item';
+      item.textContent = 'COMMENT_' + (++count) + ' 测试评论，确认分页内容没有丢失。';
+      list.appendChild(item);
+    }
+  }
+  if (name === 'short') {
+    loader.textContent = '评论加载中...';
+    setTimeout(() => { append(20); loader.remove(); }, 2300);
+  } else {
+    append(20);
+    if (name === 'spinner') {
+      loader.className = 'flow-loading';
+      loader.innerHTML = '<svg width="20" height="20"><circle cx="10" cy="10" r="8"/></svg>';
+    } else if (name === 'stalled') {
+      loader.setAttribute('aria-busy', 'true');
+      loader.textContent = '评论加载中...';
+    } else loader.textContent = '评论加载中...';
+  }
+  const expand = document.createElement('button');
+  expand.textContent = '展开剩余 2 条回复';
+  expand.onclick = () => { expand.replaceWith('EXPANDED_REPLIES'); };
+  list.prepend(expand);
+  const link = document.createElement('a');
+  link.href = 'https://example.com/other-page';
+  link.textContent = '查看全文';
+  link.onclick = (e) => { e.preventDefault(); navigated = true; };
+  list.prepend(link);
+  function next() {
+    if (name === 'short' || name === 'stalled' || pending || page >= 3) return;
+    if (scroller.scrollTop < scroller.scrollHeight - scroller.clientHeight - 5) return;
+    pending = true;
+    setTimeout(() => {
+      append(20);
+      page++;
+      pending = false;
+      if (page === 3) loader.remove();
+    }, 900); // 超过 quietMs，旧算法会在下一页返回前结束。
+  }
+  (name === 'nested' ? scroller : window).addEventListener('scroll', next);
+  const result = await captureRenderedDom({
+    minWait: 0, maxWait: 0, stepDelay: 30, settleDelay: 50,
+    quietMs: 150, bottomChecks: 3, loadingMaxMs: 3000,
+    maxScrollMs: 10000, reportEvery: 10000,
+  });
+  const captured = new DOMParser().parseFromString(result.html, 'text/html');
+  const actual = captured.querySelectorAll('app-comment-item.main-comment-item').length;
+  const expected = name === 'short' || name === 'stalled' ? 20 : 60;
+  const reason = name === 'stalled' ? 'stalled' : 'stable';
+  const passed = actual === expected && result.scrollInfo.stopReason === reason &&
+    captured.body.textContent.includes('COMMENT_' + expected) &&
+    captured.body.textContent.includes('EXPANDED_REPLIES') && !navigated &&
+    (reason !== 'stable' || result.scrollInfo.bottomChecks >= 3);
+  parent.postMessage({ fixture: name, passed, actual, expected, info: result.scrollInfo, navigated }, parent.location.origin);
+}
+
+document.getElementById('run').onclick = async () => {
+  const button = document.getElementById('run');
+  const results = document.getElementById('results');
+  button.disabled = true;
+  results.textContent = '';
+  const engine = new URLSearchParams(location.search).get('engine') === 'baseline' ? '/baseline.js' : '/extension/rendered-capture.js';
+  let failures = 0;
+  for (const name of ['slow-text', 'spinner', 'short', 'nested', 'stalled']) {
+    const frame = document.createElement('iframe');
+    document.getElementById('fixture').replaceChildren(frame);
+    const completed = new Promise((resolve) => {
+      const timeout = setTimeout(() => { window.removeEventListener('message', receive); resolve({ fixture: name, passed: false, error: 'fixture timeout' }); }, 18000);
+      function receive(e) {
+        if (e.source !== frame.contentWindow || e.origin !== location.origin || e.data?.fixture !== name) return;
+        clearTimeout(timeout);
+        window.removeEventListener('message', receive);
+        resolve(e.data);
+      }
+      window.addEventListener('message', receive);
+    });
+    const nested = name === 'nested';
+    frame.srcdoc = '<!doctype html><meta charset="utf-8"><style>' +
+      'body{margin:0;font:14px system-ui}app-comment-item{display:block;height:70px;padding:4px}' +
+      (nested ? 'main{height:300px;overflow-y:auto}aside{position:fixed;left:-10000px;top:0;width:200px;height:300px;overflow:auto}aside div{height:100000px}' : '') +
+      '</style>' + (nested ? '<aside><div>不可见的长侧栏</div></aside>' : '') +
+      '<main><div id="items"></div><div id="loader"></div></main>' +
+      '<script src="' + engine + '"><\/script><script>(' + runFixture.toString() + ')(' + JSON.stringify(name) + ').catch(e=>parent.postMessage({fixture:' + JSON.stringify(name) + ',passed:false,error:e.message},parent.location.origin))<\/script>';
+    const result = await completed;
+    failures += result.passed ? 0 : 1;
+    results.textContent += JSON.stringify(result) + '\n';
+    frame.remove();
+  }
+  results.textContent += failures ? 'FAIL: ' + failures + ' cases' : 'PASS: 5 cases';
+  button.disabled = false;
+};
+</script>
+</html>
